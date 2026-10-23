@@ -17,7 +17,7 @@ Full design: `docs/superpowers/specs/2026-10-22-embeddinggemma-coreml-design.md`
 1. Start every session with `just status`.
 2. A stage only passes if its `artifacts/sN/report.json` has `"passed": true` and `"status": "passed"`, was produced by `just stage N`, and is not stale (see "Provenance and staleness"). The report records `git_sha`, `git_dirty`, `code_hash`, `inputs_sha256`, `gate_values`, `metrics`, `passed`, `status`, and `started_at` / `finished_at`.
 3. Changing `gates.toml` requires a new `docs/decisions/ADR-*.md` in the same commit. CI enforces this with `scripts/check_gates_adr.py` (planned: Task 21).
-4. Fixtures only come from `just stage 0`. CI checks `fixtures/MANIFEST.sha256` (planned: Task 5 and Task 21).
+4. Fixtures only come from `python -m stages.s0_reference.build_fixtures` (planned: Task 5), which writes `fixtures/MANIFEST.sha256`. `just stage 0` refuses to run without that manifest, and CI checks it (planned: Task 21).
 5. No weights or `.mlpackage` files in git. The `.gitignore` plus a CI size check (no file over 5 MB, `scripts/check_large_files.py`, planned: Task 21) enforce this.
 6. Files stay under about 300 lines and have one job.
 7. When a stage fails, read that stage's README "known failure modes" (planned: each stage's task) before changing code. Any new failure mode found gets added to it.
@@ -44,7 +44,7 @@ Python unit tests only: `uv run --exact --group convert pytest -q`.
 ## Python environments
 
 - `convert` group: `torch` pinned to the version `coremltools` officially supports, plus `coremltools`, `pytest`. Used by s1–s4 and by all unit tests. Our rewrite never imports `transformers`.
-- `reference` group: `transformers` from git main plus `sentence-transformers`. Used only by s0.
+- `reference` group: `transformers==5.20.2` (a release, so the environment is reproducible; `vendor/reference/` is copied from the same tag) plus `sentence-transformers`. Used only by s0.
 
 They are declared as conflicting in `pyproject.toml`, so they cannot be installed together. `just setup` syncs only `convert`. The `reference` environment is installed the first time you run `just stage 0`, because `uv run --exact` makes the environment match one group exactly (and removes the other's packages). Switching between stages 0 and 1 therefore reinstalls packages from uv's cache.
 
@@ -63,10 +63,10 @@ They are declared as conflicting in `pyproject.toml`, so they cannot be installe
 Each report records where it came from:
 
 - `git_sha`: `git rev-parse HEAD` at run time. `git_dirty` is true if any watched path differed from HEAD.
-- `code_hash`: sha256 over `git rev-parse HEAD:<path>` for `egcm`, `stages/<stage>`, `gates.toml` and `pyproject.toml`. If those paths are dirty it also hashes `git diff HEAD -- <paths>` and the contents of untracked files in them.
+- `code_hash`: sha256 over `git rev-parse HEAD:<path>` for `egcm`, `stages/<stage>`, `gates.toml`, `pyproject.toml` and `uv.lock`. If those paths are dirty it also hashes `git diff HEAD -- <paths>` and the contents of untracked files in them.
 - `inputs_sha256`: sha256 over the sorted `(stage, code_hash, inputs_sha256)` of each upstream report the stage reads, plus `fixtures/MANIFEST.sha256` (s0 only) and the Hugging Face revision `egcm.paths.HF_REVISION` (s0 only). Which upstream reports each stage reads is `STAGE_INPUTS` in `egcm/provenance.py`.
 
-A report is **stale** if its `code_hash` differs from the current `code_hash(stage)`, or its `inputs_sha256` differs from the recomputed one, or an upstream report is missing (`egcm.provenance.is_stale`). `just status` shows it. A stale report does not count as passing. Changing code under `egcm/` makes every stage stale; changing `stages/s3_coreml_ane/` only invalidates s3 and what reads it. A stage will not run unless its upstream stages have status `passed`.
+A report is **stale** (`egcm.provenance.is_stale`) if its `code_hash` differs from the current `code_hash(stage)`, or its `inputs_sha256` differs from the recomputed one, or any upstream report it reads (`STAGE_INPUTS`) is missing, not `passed`, or itself stale, checked recursively. `just status` shows it. A stale report does not count as passing. Changing code under `egcm/` or the lock file makes every stage stale; changing `stages/s0_reference/` makes s0 stale and, through the recursion, every stage after it. `run_stage` refuses to run (status `error`) when an upstream report is missing, not passed or stale, and says which stage to rerun, for example "s0_reference is stale (code changed); rerun `just stage 0`".
 
 Run stages on a clean tree where you can: a report made on a dirty tree is stale as soon as you commit (the hash of the committed tree differs from the hash of the diff), so commit and then rerun.
 

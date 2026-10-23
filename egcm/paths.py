@@ -9,7 +9,7 @@ HF_REPO = "google/embeddinggemma-2"
 # Commit of HF_REPO that every stage uses (checked 2026-10-22). Changing it makes s0 and everything after it stale.
 HF_REVISION = "914f7f89142e33e77833254d9c9b90c3cef7303b"
 
-# Stage names in pipeline order. The justfile has the same list; tests/test_justfile.py keeps them in sync.
+# Stage names in pipeline order. The justfile has the same list; tests/test_scripts.py keeps them in sync.
 STAGES = (
     "s0_reference",
     "s1_rewrite",

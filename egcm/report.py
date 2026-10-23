@@ -35,6 +35,8 @@ class Report(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
 
+    # On read, the strings "NaN", "Infinity" and "-Infinity" in a metric become floats again. So a metric that
+    # really is one of those three strings cannot round-trip as a string; no metric is ever such a string.
     @field_validator("metrics", mode="after")
     @classmethod
     def _restore_nonfinite(cls, v: dict[str, Metric]) -> dict[str, Metric]:

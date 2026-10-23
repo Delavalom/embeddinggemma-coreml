@@ -83,7 +83,7 @@ embeddinggemma-coreml/
 1. Start every session with `just status`.
 2. A stage only passes if its `artifacts/sN/report.json` has `"passed": true` and `"status": "passed"`, was produced by `just stage N`, and is not stale. The report records `git_sha`, `git_dirty`, `code_hash`, `inputs_sha256`, `gate_values`, `metrics`, `passed`, `status` (`running | passed | failed | error`), and `started_at` / `finished_at`. A report is stale when its `code_hash` or `inputs_sha256` no longer matches the current code and upstream reports (definitions in AGENTS.md).
 3. Changing `gates.toml` requires a new `docs/decisions/ADR-*.md` in the same commit. CI enforces this with `scripts/check_gates_adr.py`.
-4. Fixtures only come from `just stage 0`. CI checks `fixtures/MANIFEST.sha256`.
+4. Fixtures only come from `python -m stages.s0_reference.build_fixtures`, which writes `fixtures/MANIFEST.sha256`. `just stage 0` refuses to run without the manifest, and CI checks it.
 5. No weights or `.mlpackage` files in git. The `.gitignore` plus a CI size check (no file over 5 MB) enforce this.
 6. Files stay under about 300 lines and have one job.
 7. When a stage fails, read that stage's README "known failure modes" before changing code. Any new failure mode found gets added to it.
@@ -124,7 +124,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 
 ## 6. Python environments
 
-- **`reference` group:** `transformers` installed from git main (needed for 5.18.0.dev0 support) plus `sentence-transformers>=6.1.0`. Used only by s0.
+- **`reference` group:** `transformers==5.20.2` (a release; EmbeddingGemma2 first shipped in 5.19.0, and the checkpoint was saved with 5.18.0.dev0) plus `sentence-transformers>=6.1.0`. Used only by s0.
 - **`convert` group:** the newest `torch` that the newest `coremltools` officially supports, plus `coremltools`, `safetensors`, `numpy`, `pydantic`, `pytest`. Used by s1–s4. Our rewrite doesn't import `transformers`.
 
 Splitting them stops a dev build of `transformers` from forcing a torch version that `coremltools` can't convert. Each stage's `run.py` declares its group, and the `justfile` runs it with `uv run --group …`.

@@ -20,6 +20,7 @@ def repo(tmp_path):
         "stages/s1_rewrite/run.py": "# group: convert\n",
         "gates.toml": "[s0_reference]\nmin_a = 0.5\n[s1_rewrite]\nmin_a = 0.5\n",
         "pyproject.toml": "[project]\nname = 'x'\n",
+        "uv.lock": "version = 1\n",
         "fixtures/MANIFEST.sha256": "abc  img.jpg\n",
         "README.md": "hi\n",
     }.items():

@@ -26,7 +26,7 @@ def put_report(root, stage, **kw):
 
 
 def test_watched_paths():
-    assert watched_paths("s1_rewrite") == ["egcm", "stages/s1_rewrite", "gates.toml", "pyproject.toml"]
+    assert watched_paths("s1_rewrite") == ["egcm", "stages/s1_rewrite", "gates.toml", "pyproject.toml", "uv.lock"]
 
 
 def test_code_hash_clean_is_stable_and_runs_git_in_root(repo, tmp_path, monkeypatch):
@@ -37,7 +37,9 @@ def test_code_hash_clean_is_stable_and_runs_git_in_root(repo, tmp_path, monkeypa
     assert len(git_sha(repo)) == 40
 
 
-@pytest.mark.parametrize("rel", ["egcm/lib.py", "stages/s1_rewrite/run.py", "gates.toml", "pyproject.toml"])
+@pytest.mark.parametrize(
+    "rel", ["egcm/lib.py", "stages/s1_rewrite/run.py", "gates.toml", "pyproject.toml", "uv.lock"]
+)
 def test_code_hash_changes_with_watched_files(repo, rel):
     before = code_hash("s1_rewrite", repo)
     write(repo, rel, "# changed\n")
@@ -95,11 +97,11 @@ def test_inputs_missing_manifest_raises(repo):
 def test_inputs_follow_upstream_reports(repo):
     with pytest.raises(MissingInputError):
         inputs_sha256("s1_rewrite", repo)
-    put_report(repo, "s0_reference", code_hash="c1", inputs_sha256="i1")
+    put_report(repo, "s0_reference", code_hash="c1", inputs_sha256="i1", status="passed", passed=True)
     a = inputs_sha256("s1_rewrite", repo)
-    put_report(repo, "s0_reference", code_hash="c2", inputs_sha256="i1")
+    put_report(repo, "s0_reference", code_hash="c2", inputs_sha256="i1", status="passed", passed=True)
     b = inputs_sha256("s1_rewrite", repo)
-    put_report(repo, "s0_reference", code_hash="c2", inputs_sha256="i2")
+    put_report(repo, "s0_reference", code_hash="c2", inputs_sha256="i2", status="passed", passed=True)
     c = inputs_sha256("s1_rewrite", repo)
     assert len({a, b, c}) == 3
 

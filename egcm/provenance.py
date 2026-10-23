@@ -48,8 +48,8 @@ def git_sha(root: Path = ROOT) -> str:
 
 
 def watched_paths(stage: str) -> list[str]:
-    """The paths whose content decides a stage's result."""
-    return ["egcm", f"stages/{stage}", "gates.toml", "pyproject.toml"]
+    """The paths whose content decides a stage's result (uv.lock fixes the installed package versions)."""
+    return ["egcm", f"stages/{stage}", "gates.toml", "pyproject.toml", "uv.lock"]
 
 
 def git_dirty(stage: str, root: Path = ROOT) -> bool:
@@ -103,13 +103,55 @@ def inputs_sha256(stage: str, root: Path = ROOT, hf_revision: str = HF_REVISION)
     return h.hexdigest()
 
 
-def is_stale(report: Report, root: Path = ROOT) -> bool:
-    """True if the code or the inputs changed since the report was made (or the inputs can't be found)."""
-    if report.stage not in STAGE_INPUTS:
-        raise ValueError(f"unknown stage {report.stage!r}")
-    if report.code_hash != code_hash(report.stage, root):
-        return True
+def _stage_number(stage: str) -> str:
+    return stage.split("_")[0][1:]
+
+
+def upstream_problem(stage: str, root: Path = ROOT) -> str | None:
+    """Why this stage cannot rely on its upstream reports, or None if it can.
+
+    An upstream report must exist, have status `passed`, and not be stale itself (checked recursively,
+    so the message names the earliest stage that needs rerunning).
+    """
+    for up in sorted(STAGE_INPUTS[stage].upstream):
+        n = _stage_number(up)
+        p = root / "artifacts" / up / "report.json"
+        if not p.is_file():
+            return f"{up} has no report; run `just stage {n}`"
+        try:
+            r = read_report(p)
+        except Exception:
+            return f"{up} has an unreadable report; rerun `just stage {n}`"
+        if r.status != "passed" or not r.passed:
+            return f"{up} has status {r.status!r}; rerun `just stage {n}`"
+        if why := stale_reason(r, root):
+            return why
+    return None
+
+
+def stale_reason(report: Report, root: Path = ROOT) -> str | None:
+    """Why a report is stale, or None if it is current.
+
+    Stale means any of: an upstream report is missing, not passed or itself stale; the stage's code changed
+    (`code_hash`); or its inputs changed (`inputs_sha256`).
+    """
+    stage = report.stage
+    if stage not in STAGE_INPUTS:
+        raise ValueError(f"unknown stage {stage!r}")
+    if why := upstream_problem(stage, root):
+        return why
+    rerun = f"rerun `just stage {_stage_number(stage)}`"
+    if report.code_hash != code_hash(stage, root):
+        return f"{stage} is stale (code changed); {rerun}"
     try:
-        return report.inputs_sha256 != inputs_sha256(report.stage, root)
+        if report.inputs_sha256 != inputs_sha256(stage, root):
+            return f"{stage} is stale (inputs changed); {rerun}"
     except MissingInputError:
-        return True
+        return f"{stage} is stale (an input is missing); {rerun}"
+    return None
+
+
+def is_stale(report: Report, root: Path = ROOT) -> bool:
+    """True if `stale_reason` finds anything: changed code or inputs, or an upstream report that is
+    missing, not passed or stale (recursively)."""
+    return stale_reason(report, root) is not None

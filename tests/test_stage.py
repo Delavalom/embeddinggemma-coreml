@@ -1,7 +1,9 @@
 import math
+import sys
 
 import numpy as np
 import pytest
+from conftest import commit
 
 from egcm.provenance import code_hash, inputs_sha256, is_stale
 from egcm.report import Report, read_report, write_report
@@ -118,3 +120,78 @@ def test_upstream_must_have_passed(repo):
 
     run_stage("s0_reference", ok, root=repo)
     assert run_stage("s1_rewrite", ok, root=repo).passed
+
+
+def test_sys_exit_zero_in_fn_is_an_error_and_exits_one(repo):
+    def fn(r):
+        ok(r)
+        sys.exit(0)  # must not look like a pass
+
+    with pytest.raises(SystemExit) as e:
+        run_stage("s0_reference", fn, root=repo)
+    assert e.value.code == 1
+    back = read_report(report_path(repo))
+    assert back.status == "error" and not back.passed
+    assert "SystemExit" in back.failures[0] and "SystemExit" in back.details["traceback"]
+
+
+def test_sys_exit_nonzero_in_fn_exits_one(repo):
+    def fn(r):
+        sys.exit(7)
+
+    with pytest.raises(SystemExit) as e:
+        run_stage("s0_reference", fn, root=repo)
+    assert e.value.code == 1
+    assert read_report(report_path(repo)).status == "error"
+
+
+def test_keyboard_interrupt_is_recorded_and_reraised(repo):
+    seed(repo, status="passed", passed=True)
+
+    def fn(r):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_stage("s0_reference", fn, root=repo)
+    back = read_report(report_path(repo))
+    assert back.status == "error" and not back.passed and back.finished_at
+
+
+def run_s0_and_s1(repo):
+    run_stage("s0_reference", ok, root=repo)
+    run_stage("s1_rewrite", ok, root=repo)
+
+
+def test_stale_upstream_propagates_and_run_stage_refuses(repo):
+    run_s0_and_s1(repo)
+    s1 = read_report(report_path(repo, "s1_rewrite"))
+    assert not is_stale(read_report(report_path(repo)), repo) and not is_stale(s1, repo)
+
+    (repo / "stages" / "s0_reference" / "run.py").write_text("# group: reference\n# changed\n")
+    commit(repo)
+
+    assert is_stale(read_report(report_path(repo)), repo)
+    assert is_stale(s1, repo)  # s1's own code and recorded inputs are unchanged; s0 is what went stale
+    with pytest.raises(SystemExit):
+        run_stage("s1_rewrite", ok, root=repo)
+    back = read_report(report_path(repo, "s1_rewrite"))
+    assert back.status == "error" and not back.passed
+    assert "s0_reference is stale" in back.failures[0] and "just stage 0" in back.failures[0]
+
+    # rerunning s0 then s1 makes everything current again
+    run_s0_and_s1(repo)
+    assert not is_stale(read_report(report_path(repo, "s1_rewrite")), repo)
+
+
+def test_downstream_refuses_to_run_on_missing_upstream_with_a_clear_message(repo):
+    with pytest.raises(SystemExit):
+        run_stage("s1_rewrite", ok, root=repo)
+    assert "s0_reference has no report" in read_report(report_path(repo, "s1_rewrite")).failures[0]
+
+
+def test_lock_change_makes_stage_stale(repo):
+    run_stage("s0_reference", ok, root=repo)
+    assert not is_stale(read_report(report_path(repo)), repo)
+    (repo / "uv.lock").write_text("version = 1\n# new pin\n")
+    commit(repo)
+    assert is_stale(read_report(report_path(repo)), repo)
