@@ -15,7 +15,9 @@ def repo(tmp_path):
     """A throwaway git repo shaped like the real one, with one commit."""
     root = tmp_path / "repo"
     for rel, text in {
-        "egcm/lib.py": "X = 1\n",
+        "egcm/paths.py": "X = 1\n",
+        "egcm/model/x.py": "M = 1\n",
+        "egcm/stage.py": "S = 1\n",
         "stages/s0_reference/run.py": "# group: reference\n",
         "stages/s1_rewrite/run.py": "# group: convert\n",
         "gates.toml": "[s0_reference]\nmin_a = 0.5\n[s1_rewrite]\nmin_a = 0.5\n",

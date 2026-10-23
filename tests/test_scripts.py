@@ -38,7 +38,7 @@ def test_status_passed_stale_and_next(repo):
     assert "| passed | yes | no |" in row
     assert "Next: `just stage 1`" in text
 
-    (repo / "egcm" / "lib.py").write_text("X = 2\n")
+    (repo / "egcm" / "paths.py").write_text("X = 2\n")
     commit(repo)
     row = next(line for line in render(repo).splitlines() if line.startswith("| s0_reference"))
     assert "| passed | yes | yes |" in row  # stale

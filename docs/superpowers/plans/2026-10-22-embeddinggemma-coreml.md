@@ -48,7 +48,9 @@
 - **Clipped linears:** `use_clipped_linears = False` for vision, so they are plain linears. Weight keys are `...q_proj.linear.weight`.
 - **Pooler:** zero the padding → average each 3×3 patch block (row-major over blocks) → `* sqrt(768)` in FP32 → (standardize = False).
 - **`embed_vision`:** `RMSNorm_768(no weight)` → Linear(768→512). RMSNorm without weight is scale-invariant, so **the rewrite drops the `* sqrt(768)`** (an exact identity apart from eps, ~1e-6 relative). This removes the one FP16 overflow upstream had to call out.
-- **Image sequence:** the image soft tokens replace `<|image|>` placeholders inside `"<|image>" + "<|image|>"*n + "<image|>"`. The exact full token list, including any bos/eos, **is recorded by s0**.
+- **Image sequence (recorded by s0 in `image_token_layout.json`, identical in shape for all ten buckets):** `[<bos>=2, <|image>=255999, <|image|>=258880 × soft_tokens, <image|>=258882, <eos>=1]`, so the length is soft_tokens + 4 (64 to 284 tokens). The soft tokens replace the `<|image|>` placeholders as `embed_vision` outputs, **unscaled**; the other four tokens are `embed_tokens(id) * sqrt(512)` (exactly `512**0.5` in FP32, checked against `debug.npz`). PLE is computed from this merged `inputs_embeds`. Mean pooling covers all tokens, including bos, eos, `<|image>` and `<image|>`.
+- **Text sequence (recorded by s0 in `texts.npz`):** `[<bos>=2] + tokens(prompt + text) + [<eos>=1]`, with the prompt `task: search result | query: ` (queries) or `title: none | text: ` (documents) concatenated as plain text. The longest fixture text (t199) is exactly 128 tokens, so every fixture text fits `embed_text_128`.
+- **Processor patches:** `pixel_values` are padded to `budget·9` rows with position `(-1, -1)`. The valid rows equal, bit for bit, the bucket image `u8.astype(float32) * float32(1/255)` patchified in `(py, px, c)` order (not `u8 / 255`, which differs by up to 6e-8), and the positions are the row-major `(x, y)` meshgrid. s0 asserts both and stores the bucket image as uint8 HxWx3; read it with `egcm.fixtures.load_bucket_pixels`.
 
 **Image preprocessing:**
 1. Convert to RGB, then resize with bicubic + antialias (`resample: 3`) to the largest size that keeps aspect ratio, whose sides are multiples of 48, and whose area is ≤ budget·9·256.
@@ -559,6 +561,8 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 
 ### Task 5: Fixtures (s0, part a)
 
+> **Implemented, with these changes.** At JPEG quality 92 the 100 Commons photos alone came to 53 MB at a 1600-px max side, so they are saved at quality 85 (fixtures/ is 55 MB). Memes, blurry and dark images are made at a 1200-px max side. The chosen Commons files are pinned in `fixtures/commons_sources.json` (rebuilds reuse it; `--requery` searches again) and at most two files share a two-word title prefix, because search returned bursts of the same scene. Search uses `generator=search` with `incategory:CC-Zero` plus a license check on `extmetadata.LicenseShortName`. Fonts are macOS system fonts (Helvetica, Impact, Courier New); each synthetic row records its font. The rendering code is split into `stages/s0_reference/commons.py` and `synth.py`. A rebuild on this machine gives byte-identical files.
+
 **Files:** create `stages/s0_reference/build_fixtures.py`, `egcm/fixtures.py`, `fixtures/texts.jsonl`, `fixtures/images.jsonl`, `fixtures/images/*`, `fixtures/MANIFEST.sha256`.
 
 - [ ] **Step 1: Write `fixtures/texts.jsonl`.** 200 lines, `{"id": "t000", "text": "...", "kind": "query"|"document"}`:
@@ -578,6 +582,8 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 - [ ] **Step 5: Commit.** `git add fixtures stages/s0_reference/build_fixtures.py egcm/fixtures.py tests/test_fixtures_manifest.py && git commit -m "feat: CC0 fixtures"`. The total fixture size must stay under 60 MB. If it doesn't, downscale the Commons photos to a 1600-px max side at build time.
 
 ### Task 6: s0 reference run
+
+> **Implemented, with these changes.** Token ids come from `model.preprocess` (`model.tokenize` is deprecated in sentence-transformers 6.x); the official embedding path is `model.encode({"image": img}, processing_kwargs={"image": {"max_soft_tokens": budget}})`, which agreed with the manual path at cosine ≥ 0.9999998. Model helpers are in `stages/s0_reference/reference.py`. `images_<budget>.npz` stores the bucket image as uint8 HxWx3 (deflated, written one array at a time) after asserting the bit-exact pixel contract; `egcm.fixtures.load_bucket_pixels` turns it back into model input. After review: per-stage code hashing (`STAGE_CODE`), fixtures converted to sRGB, pinned sha256 per Commons download, and the model's sha256 checked. `keys.json` and `image_token_layout.json` matched the Facts and the Task 12 mapping table; the recorded image and text sequences were added to the Facts. The long text t199 was trimmed from 156 to 128 tokens so that it fits `embed_text_128`.
 
 **Files:** create `stages/s0_reference/run.py`, `stages/s0_reference/README.md`.
 

@@ -17,10 +17,10 @@ Full design: `docs/superpowers/specs/2026-10-22-embeddinggemma-coreml-design.md`
 1. Start every session with `just status`.
 2. A stage only passes if its `artifacts/sN/report.json` has `"passed": true` and `"status": "passed"`, was produced by `just stage N`, and is not stale (see "Provenance and staleness"). The report records `git_sha`, `git_dirty`, `code_hash`, `inputs_sha256`, `gate_values`, `metrics`, `passed`, `status`, and `started_at` / `finished_at`.
 3. Changing `gates.toml` requires a new `docs/decisions/ADR-*.md` in the same commit. CI enforces this with `scripts/check_gates_adr.py` (planned: Task 21).
-4. Fixtures only come from `python -m stages.s0_reference.build_fixtures` (planned: Task 5), which writes `fixtures/MANIFEST.sha256`. `just stage 0` refuses to run without that manifest, and CI checks it (planned: Task 21).
+4. Fixtures only come from `python -m stages.s0_reference.build_fixtures`, which writes `fixtures/MANIFEST.sha256`. `just stage 0` refuses to run without that manifest, and CI checks it (planned: Task 21).
 5. No weights or `.mlpackage` files in git. The `.gitignore` plus a CI size check (no file over 5 MB, `scripts/check_large_files.py`, planned: Task 21) enforce this.
 6. Files stay under about 300 lines and have one job.
-7. When a stage fails, read that stage's README "known failure modes" (planned: each stage's task) before changing code. Any new failure mode found gets added to it.
+7. When a stage fails, read that stage's README "known failure modes" (s0 has one; the others land with each stage's task) before changing code. Any new failure mode found gets added to it.
 
 ## Commands
 
@@ -37,7 +37,7 @@ just bench-device      # run the s6 benchmark on the connected iPhone (planned: 
 just publish           # s7. Refuses to run unless s0–s6 pass AND --confirm is given (planned: Task 22)
 ```
 
-`just stage N` needs `stages/sN_*/run.py` (planned: Task 6 for s0, then one per stage). Line 1 of each `run.py` is `# group: convert` or `# group: reference`; the recipe runs it with `uv run --exact --group <that group>`, then regenerates `STATUS.md` and keeps the stage's exit code.
+`just stage N` needs `stages/sN_*/run.py` (s0 exists; the rest are planned, one per stage). Line 1 of each `run.py` is `# group: convert` or `# group: reference`; the recipe runs it with `uv run --exact --group <that group>`, then regenerates `STATUS.md` and keeps the stage's exit code.
 
 Python unit tests only: `uv run --exact --group convert pytest -q`.
 
@@ -63,10 +63,10 @@ They are declared as conflicting in `pyproject.toml`, so they cannot be installe
 Each report records where it came from:
 
 - `git_sha`: `git rev-parse HEAD` at run time. `git_dirty` is true if any watched path differed from HEAD.
-- `code_hash`: sha256 over `git rev-parse HEAD:<path>` for `egcm`, `stages/<stage>`, `gates.toml`, `pyproject.toml` and `uv.lock`. If those paths are dirty it also hashes `git diff HEAD -- <paths>` and the contents of untracked files in them.
+- `code_hash`: sha256 over `git rev-parse HEAD:<path>` for the stage's code paths (`STAGE_CODE` in `egcm/provenance.py`: the stage's own directory, the `egcm` modules that decide its outputs, `pyproject.toml` and `uv.lock`), plus the stage's own table in `gates.toml` (by value, so other stages' tables, comments and layout do not count). If the code paths are dirty it also hashes `git diff HEAD -- <paths>` and the contents of untracked files in them. Infrastructure (`egcm/stage.py`, `provenance.py`, `report.py`, `gates.py`, `scripts/`) is in no stage's paths: changing how reports are written does not change what a stage computes. When you add a module a stage uses, add it to that stage's `STAGE_CODE` entry.
 - `inputs_sha256`: sha256 over the sorted `(stage, code_hash, inputs_sha256)` of each upstream report the stage reads, plus `fixtures/MANIFEST.sha256` (s0 only) and the Hugging Face revision `egcm.paths.HF_REVISION` (s0 only). Which upstream reports each stage reads is `STAGE_INPUTS` in `egcm/provenance.py`.
 
-A report is **stale** (`egcm.provenance.is_stale`) if its `code_hash` differs from the current `code_hash(stage)`, or its `inputs_sha256` differs from the recomputed one, or any upstream report it reads (`STAGE_INPUTS`) is missing, not `passed`, or itself stale, checked recursively. `just status` shows it. A stale report does not count as passing. Changing code under `egcm/` or the lock file makes every stage stale; changing `stages/s0_reference/` makes s0 stale and, through the recursion, every stage after it. `run_stage` refuses to run (status `error`) when an upstream report is missing, not passed or stale, and says which stage to rerun, for example "s0_reference is stale (code changed); rerun `just stage 0`".
+A report is **stale** (`egcm.provenance.is_stale`) if its `code_hash` differs from the current `code_hash(stage)`, or its `inputs_sha256` differs from the recomputed one, or any upstream report it reads (`STAGE_INPUTS`) is missing, not `passed`, or itself stale, checked recursively. `just status` shows it. A stale report does not count as passing. Changing the lock file makes every stage stale. Changing `egcm/model/` makes s1 to s4 stale but not s0. Changing `stages/s0_reference/` or a module s0 uses (`buckets.py`, `fixtures.py`, `paths.py`) makes s0 stale and, through the recursion, every stage after it. `run_stage` refuses to run (status `error`) when an upstream report is missing, not passed or stale, and says which stage to rerun, for example "s0_reference is stale (code changed); rerun `just stage 0`".
 
 Run stages on a clean tree where you can: a report made on a dirty tree is stale as soon as you commit (the hash of the committed tree differs from the hash of the diff), so commit and then rerun.
 
@@ -76,7 +76,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 
 | Stage | What it does | Gate |
 |---|---|---|
-| **s0_reference** | Downloads the weights (revision pinned by commit SHA), runs the official `sentence-transformers` model in FP32 on CPU. Writes golden 768-d vectors, token ids, preprocessed pixel tensors and the exact image token sequence. Also lists every weight key and shape | deterministic: two runs give identical files. License recorded as Apache-2.0. Key inventory written |
+| **s0_reference** | Downloads the weights (revision pinned by commit SHA), runs the official `sentence-transformers` model in FP32 on CPU. Writes golden 768-d vectors, token ids, preprocessed pixel tensors and the exact image token sequence. Also lists every weight key and shape | deterministic: an in-process rerun of a sample (one image per bucket shape, a query, a document, the longest text) is bitwise identical. License recorded as Apache-2.0. Key inventory written. Enforced (raises): fixtures match the manifest, model sha256, `encode` agrees with the manual path, bit-exact pixel contract |
 | **s1_rewrite** | Our PyTorch rewrite, FP32, same inputs | min cosine ≥ 0.9999 (text and image). Strict weight load |
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | min cosine ≥ 0.995, and ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
@@ -89,6 +89,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 
 - The model is rewritten in plain PyTorch in the Neural Engine layout (`(B, C, 1, S)`, 1x1 convs, per-head attention), loaded with Google's weights, then converted with `coremltools`. We do not trace Hugging Face's code.
 - The model card says BF16 or FP32 only, not FP16. FP16 overflow is the main risk in s3; `egcm/probe.py` (planned: Task 14) finds where.
+- Fixture pixels are sRGB. Downstream stages read s0's bucket images only through `egcm.fixtures.load_bucket_pixels(budget, image_id)` (`u8.astype(np.float32) * np.float32(1/255)`, `[1, 3, H, W]`).
 - Images use ten fixed shape buckets (budgets 70 and 280 x tall/portrait/square/landscape/wide). See `egcm/buckets.py` and `docs/decisions/ADR-0002-image-buckets.md`.
 - `vendor/reference/` holds read-only upstream copies, pinned in `SOURCE.txt`. Read them for ground truth on the architecture; never import them.
 - Do not guess model behavior. s0 records the real processor output (image token sequence, key inventory); build on that.
@@ -115,11 +116,11 @@ egcm/                     shared Python library
   convert.py              torch -> mlpackage + multifunction merge (planned: Task 13)
   compress.py             int8 / palettize (planned: Task 15)
   probe.py                activation max-abs probe (planned: Task 14)
-  fixtures.py             fixture manifest helpers (planned: Task 5)
+  fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)
 stages/sN_*/              README.md (input, output, gate, known failure modes) + run.py (planned: one per stage)
 scripts/                  package. gen_status.py now; gen_results.py, check_gates_adr.py, check_large_files.py (planned: Task 21)
 tests/                    pytest unit tests for the Python library
-fixtures/                 generated by s0; MANIFEST.sha256 is committed (planned: Task 5)
+fixtures/                 written by build_fixtures and committed: images/, images.jsonl, texts.jsonl (hand-written), commons_sources.json, MANIFEST.sha256
 swift/                    SwiftPM package, Package.swift at swift/ (planned: Task 16)
 Examples/PhotoSearchDemo/ SwiftUI demo app (planned: Task 20)
 docs/decisions/           ADR-NNNN-*.md (numbered)
