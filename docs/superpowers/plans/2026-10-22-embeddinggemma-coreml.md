@@ -559,6 +559,8 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 
 ### Task 5: Fixtures (s0, part a)
 
+> **Implemented, with these changes.** At JPEG quality 92 the 100 Commons photos alone came to 53 MB at a 1600-px max side, so they are saved at quality 85 (fixtures/ is 55 MB). Memes, blurry and dark images are made at a 1200-px max side. The chosen Commons files are pinned in `fixtures/commons_sources.json` (rebuilds reuse it; `--requery` searches again) and at most two files share a two-word title prefix, because search returned bursts of the same scene. Search uses `generator=search` with `incategory:CC-Zero` plus a license check on `extmetadata.LicenseShortName`. Fonts are macOS system fonts (Helvetica, Impact, Courier New); each synthetic row records its font. The rendering code is split into `stages/s0_reference/commons.py` and `synth.py`. A rebuild on this machine gives byte-identical files.
+
 **Files:** create `stages/s0_reference/build_fixtures.py`, `egcm/fixtures.py`, `fixtures/texts.jsonl`, `fixtures/images.jsonl`, `fixtures/images/*`, `fixtures/MANIFEST.sha256`.
 
 - [ ] **Step 1: Write `fixtures/texts.jsonl`.** 200 lines, `{"id": "t000", "text": "...", "kind": "query"|"document"}`:

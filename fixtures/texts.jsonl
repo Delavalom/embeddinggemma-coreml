@@ -1,0 +1,200 @@
+{"id": "t000", "text": "screenshots of tweets", "kind": "query"}
+{"id": "t001", "text": "blurry photos", "kind": "query"}
+{"id": "t002", "text": "receipts", "kind": "query"}
+{"id": "t003", "text": "memes", "kind": "query"}
+{"id": "t004", "text": "a photo of a dog", "kind": "query"}
+{"id": "t005", "text": "whiteboard notes", "kind": "query"}
+{"id": "t006", "text": "food I ate", "kind": "query"}
+{"id": "t007", "text": "photos of documents", "kind": "query"}
+{"id": "t008", "text": "nude or private photos", "kind": "query"}
+{"id": "t009", "text": "duplicate selfies", "kind": "query"}
+{"id": "t010", "text": "parking ticket", "kind": "query"}
+{"id": "t011", "text": "boarding pass", "kind": "query"}
+{"id": "t012", "text": "a sunset at the beach", "kind": "query"}
+{"id": "t013", "text": "screenshots of text messages", "kind": "query"}
+{"id": "t014", "text": "my cat sleeping", "kind": "query"}
+{"id": "t015", "text": "pictures of my car", "kind": "query"}
+{"id": "t016", "text": "dark photos taken at night", "kind": "query"}
+{"id": "t017", "text": "photos with my thumb over the lens", "kind": "query"}
+{"id": "t018", "text": "group photos from the wedding", "kind": "query"}
+{"id": "t019", "text": "pizza", "kind": "query"}
+{"id": "t020", "text": "coffee latte art", "kind": "query"}
+{"id": "t021", "text": "handwritten notes", "kind": "query"}
+{"id": "t022", "text": "grocery receipt", "kind": "query"}
+{"id": "t023", "text": "screenshot of a bank statement", "kind": "query"}
+{"id": "t024", "text": "passport photo page", "kind": "query"}
+{"id": "t025", "text": "driver's license", "kind": "query"}
+{"id": "t026", "text": "credit card photo", "kind": "query"}
+{"id": "t027", "text": "medical documents", "kind": "query"}
+{"id": "t028", "text": "prescription label", "kind": "query"}
+{"id": "t029", "text": "screenshots of instagram posts", "kind": "query"}
+{"id": "t030", "text": "funny memes with text", "kind": "query"}
+{"id": "t031", "text": "reaction gifs saved from twitter", "kind": "query"}
+{"id": "t032", "text": "pictures of mountains", "kind": "query"}
+{"id": "t033", "text": "snow landscape", "kind": "query"}
+{"id": "t034", "text": "city skyline at night", "kind": "query"}
+{"id": "t035", "text": "old buildings and churches", "kind": "query"}
+{"id": "t036", "text": "photos of my kids playing", "kind": "query"}
+{"id": "t037", "text": "birthday cake with candles", "kind": "query"}
+{"id": "t038", "text": "christmas tree", "kind": "query"}
+{"id": "t039", "text": "fireworks", "kind": "query"}
+{"id": "t040", "text": "concert crowd", "kind": "query"}
+{"id": "t041", "text": "selfie in the mirror", "kind": "query"}
+{"id": "t042", "text": "gym selfies", "kind": "query"}
+{"id": "t043", "text": "outfit of the day", "kind": "query"}
+{"id": "t044", "text": "shoes I wanted to buy", "kind": "query"}
+{"id": "t045", "text": "screenshot of a product page", "kind": "query"}
+{"id": "t046", "text": "online shopping order confirmation", "kind": "query"}
+{"id": "t047", "text": "flight itinerary screenshot", "kind": "query"}
+{"id": "t048", "text": "hotel booking confirmation", "kind": "query"}
+{"id": "t049", "text": "map screenshot with directions", "kind": "query"}
+{"id": "t050", "text": "wifi password written on paper", "kind": "query"}
+{"id": "t051", "text": "QR code", "kind": "query"}
+{"id": "t052", "text": "menu at a restaurant", "kind": "query"}
+{"id": "t053", "text": "wine bottle label", "kind": "query"}
+{"id": "t054", "text": "cocktails at a bar", "kind": "query"}
+{"id": "t055", "text": "breakfast eggs and toast", "kind": "query"}
+{"id": "t056", "text": "sushi", "kind": "query"}
+{"id": "t057", "text": "burger and fries", "kind": "query"}
+{"id": "t058", "text": "salad bowl", "kind": "query"}
+{"id": "t059", "text": "homemade pasta", "kind": "query"}
+{"id": "t060", "text": "dog at the park", "kind": "query"}
+{"id": "t061", "text": "puppy", "kind": "query"}
+{"id": "t062", "text": "two cats together", "kind": "query"}
+{"id": "t063", "text": "cat on the couch", "kind": "query"}
+{"id": "t064", "text": "horse", "kind": "query"}
+{"id": "t065", "text": "birds in the sky", "kind": "query"}
+{"id": "t066", "text": "flowers in the garden", "kind": "query"}
+{"id": "t067", "text": "trees in autumn", "kind": "query"}
+{"id": "t068", "text": "forest trail", "kind": "query"}
+{"id": "t069", "text": "lake with mountains", "kind": "query"}
+{"id": "t070", "text": "waterfall", "kind": "query"}
+{"id": "t071", "text": "desert road trip", "kind": "query"}
+{"id": "t072", "text": "ocean waves", "kind": "query"}
+{"id": "t073", "text": "boats in a harbor", "kind": "query"}
+{"id": "t074", "text": "red sports car", "kind": "query"}
+{"id": "t075", "text": "car dashboard warning light", "kind": "query"}
+{"id": "t076", "text": "car accident damage photo", "kind": "query"}
+{"id": "t077", "text": "license plate", "kind": "query"}
+{"id": "t078", "text": "bicycle", "kind": "query"}
+{"id": "t079", "text": "train station", "kind": "query"}
+{"id": "t080", "text": "airport terminal", "kind": "query"}
+{"id": "t081", "text": "view from airplane window", "kind": "query"}
+{"id": "t082", "text": "street at night with lights", "kind": "query"}
+{"id": "t083", "text": "rainy window", "kind": "query"}
+{"id": "t084", "text": "sunrise over the city", "kind": "query"}
+{"id": "t085", "text": "photos of the moon", "kind": "query"}
+{"id": "t086", "text": "screenshot of a recipe", "kind": "query"}
+{"id": "t087", "text": "screenshot of a news article", "kind": "query"}
+{"id": "t088", "text": "screenshot of a chat conversation", "kind": "query"}
+{"id": "t089", "text": "settings screen screenshot", "kind": "query"}
+{"id": "t090", "text": "screenshot of an error message", "kind": "query"}
+{"id": "t091", "text": "app store screenshot", "kind": "query"}
+{"id": "t092", "text": "screenshot of a calendar invite", "kind": "query"}
+{"id": "t093", "text": "lecture slides photographed in class", "kind": "query"}
+{"id": "t094", "text": "photo of a book page", "kind": "query"}
+{"id": "t095", "text": "contract or signed agreement", "kind": "query"}
+{"id": "t096", "text": "tax form", "kind": "query"}
+{"id": "t097", "text": "invoice", "kind": "query"}
+{"id": "t098", "text": "utility bill", "kind": "query"}
+{"id": "t099", "text": "business card", "kind": "query"}
+{"id": "t100", "text": "sticky notes on a monitor", "kind": "query"}
+{"id": "t101", "text": "ID card", "kind": "query"}
+{"id": "t102", "text": "lock screen screenshot", "kind": "query"}
+{"id": "t103", "text": "accidental pocket photos", "kind": "query"}
+{"id": "t104", "text": "photos that are almost black", "kind": "query"}
+{"id": "t105", "text": "overexposed washed out photos", "kind": "query"}
+{"id": "t106", "text": "out of focus picture of a person", "kind": "query"}
+{"id": "t107", "text": "near duplicate photos of the same scene", "kind": "query"}
+{"id": "t108", "text": "burst photos of the same moment", "kind": "query"}
+{"id": "t109", "text": "screenshots I no longer need", "kind": "query"}
+{"id": "t110", "text": "photos of my apartment", "kind": "query"}
+{"id": "t111", "text": "living room interior", "kind": "query"}
+{"id": "t112", "text": "kitchen renovation", "kind": "query"}
+{"id": "t113", "text": "broken appliance for warranty claim", "kind": "query"}
+{"id": "t114", "text": "package delivered at the door", "kind": "query"}
+{"id": "t115", "text": "people hugging", "kind": "query"}
+{"id": "t116", "text": "family dinner", "kind": "query"}
+{"id": "t117", "text": "baby photos", "kind": "query"}
+{"id": "t118", "text": "graduation ceremony", "kind": "query"}
+{"id": "t119", "text": "sexy or revealing pictures", "kind": "query"}
+{"id": "t120", "text": "A golden retriever runs across a grassy park with a red ball in its mouth.", "kind": "document"}
+{"id": "t121", "text": "A tabby cat is curled up asleep on a gray sofa cushion.", "kind": "document"}
+{"id": "t122", "text": "A plate of spaghetti with tomato sauce and fresh basil sits on a wooden table.", "kind": "document"}
+{"id": "t123", "text": "The sun sets over a calm beach, turning the sky orange and pink.", "kind": "document"}
+{"id": "t124", "text": "A snow-capped mountain rises behind a pine forest under a clear blue sky.", "kind": "document"}
+{"id": "t125", "text": "A screenshot shows a text message conversation about dinner plans.", "kind": "document"}
+{"id": "t126", "text": "A crumpled grocery store receipt lists milk, eggs, bread and coffee.", "kind": "document"}
+{"id": "t127", "text": "A whiteboard is covered with handwritten diagrams from a project meeting.", "kind": "document"}
+{"id": "t128", "text": "A blurry photo of a person walking, taken while the camera was moving.", "kind": "document"}
+{"id": "t129", "text": "An almost completely dark photo taken by accident inside a pocket.", "kind": "document"}
+{"id": "t130", "text": "A meme shows a surprised cat with bold white text at the top and bottom.", "kind": "document"}
+{"id": "t131", "text": "A boarding pass for a morning flight with a barcode and seat number.", "kind": "document"}
+{"id": "t132", "text": "A parking ticket is tucked under the windshield wiper of a blue car.", "kind": "document"}
+{"id": "t133", "text": "Two nearly identical selfies of a woman smiling in front of a mirror.", "kind": "document"}
+{"id": "t134", "text": "A red vintage car is parked on a cobblestone street in an old town.", "kind": "document"}
+{"id": "t135", "text": "A tall glass skyscraper reflects the clouds in the afternoon light.", "kind": "document"}
+{"id": "t136", "text": "An old stone church with a bell tower stands in a village square.", "kind": "document"}
+{"id": "t137", "text": "A cup of cappuccino with a heart drawn in the milk foam.", "kind": "document"}
+{"id": "t138", "text": "A birthday cake with lit candles sits in the middle of a party table.", "kind": "document"}
+{"id": "t139", "text": "A family gathers around a dinner table filled with dishes.", "kind": "document"}
+{"id": "t140", "text": "A screenshot of a social media post with likes and comments below it.", "kind": "document"}
+{"id": "t141", "text": "A settings screen on a phone shows toggles for Wi-Fi and Bluetooth.", "kind": "document"}
+{"id": "t142", "text": "A handwritten letter on lined paper with a signature at the bottom.", "kind": "document"}
+{"id": "t143", "text": "A page from an old book with dense printed text and a page number.", "kind": "document"}
+{"id": "t144", "text": "A scanned invoice lists line items, a subtotal, tax and a total due.", "kind": "document"}
+{"id": "t145", "text": "A bowl of ramen with a soft-boiled egg, green onions and pork slices.", "kind": "document"}
+{"id": "t146", "text": "A black and white dog sleeps on a rug next to a fireplace.", "kind": "document"}
+{"id": "t147", "text": "A waterfall pours into a clear pool surrounded by green moss.", "kind": "document"}
+{"id": "t148", "text": "A city skyline glows with lights at night across a river.", "kind": "document"}
+{"id": "t149", "text": "A rainy window with water droplets blurring the street outside.", "kind": "document"}
+{"id": "t150", "text": "A screenshot of a map with a blue route line between two points.", "kind": "document"}
+{"id": "t151", "text": "A restaurant menu with prices printed in two columns.", "kind": "document"}
+{"id": "t152", "text": "A close-up of a driver's license with the personal details visible.", "kind": "document"}
+{"id": "t153", "text": "A tray of sushi rolls with soy sauce and wasabi on the side.", "kind": "document"}
+{"id": "t154", "text": "A cheeseburger with fries and a soft drink on a diner counter.", "kind": "document"}
+{"id": "t155", "text": "A colorful salad with tomatoes, cucumbers, avocado and greens.", "kind": "document"}
+{"id": "t156", "text": "A kitten plays with a ball of yarn on a wooden floor.", "kind": "document"}
+{"id": "t157", "text": "A puppy chews on a stick in the backyard grass.", "kind": "document"}
+{"id": "t158", "text": "A sailboat drifts on a lake at sunrise with mist on the water.", "kind": "document"}
+{"id": "t159", "text": "A desert highway stretches toward red rock formations.", "kind": "document"}
+{"id": "t160", "text": "Autumn trees with orange and yellow leaves line a quiet road.", "kind": "document"}
+{"id": "t161", "text": "A garden full of blooming tulips in red, yellow and purple.", "kind": "document"}
+{"id": "t162", "text": "A flock of birds flies across a cloudy sky at dusk.", "kind": "document"}
+{"id": "t163", "text": "A train arrives at a busy station platform with waiting passengers.", "kind": "document"}
+{"id": "t164", "text": "A view of clouds and a wing from an airplane window seat.", "kind": "document"}
+{"id": "t165", "text": "A bicycle leans against a brick wall on a sunny sidewalk.", "kind": "document"}
+{"id": "t166", "text": "A screenshot of an online order confirmation with a delivery date.", "kind": "document"}
+{"id": "t167", "text": "A hotel booking confirmation shows check-in and check-out dates.", "kind": "document"}
+{"id": "t168", "text": "A photo of lecture slides projected on a screen in a classroom.", "kind": "document"}
+{"id": "t169", "text": "A signed contract lies on a desk next to a pen.", "kind": "document"}
+{"id": "t170", "text": "A utility bill shows the amount due and the payment deadline.", "kind": "document"}
+{"id": "t171", "text": "A business card with a name, phone number and email address.", "kind": "document"}
+{"id": "t172", "text": "Sticky notes with reminders are stuck around a computer monitor.", "kind": "document"}
+{"id": "t173", "text": "A QR code printed on a poster at a bus stop.", "kind": "document"}
+{"id": "t174", "text": "A bottle of red wine with a decorative label on a dinner table.", "kind": "document"}
+{"id": "t175", "text": "Two cocktails with lime garnish on a bar counter at night.", "kind": "document"}
+{"id": "t176", "text": "A plate of scrambled eggs, toast and bacon for breakfast.", "kind": "document"}
+{"id": "t177", "text": "A modern living room with a white couch and large windows.", "kind": "document"}
+{"id": "t178", "text": "A kitchen under renovation with exposed walls and new cabinets.", "kind": "document"}
+{"id": "t179", "text": "A cardboard package sits on a doorstep after delivery.", "kind": "document"}
+{"id": "t180", "text": "A group of friends poses for a photo at a wedding reception.", "kind": "document"}
+{"id": "t181", "text": "A crowd at an outdoor concert holds up phones toward the stage.", "kind": "document"}
+{"id": "t182", "text": "Fireworks explode in bright colors over a harbor.", "kind": "document"}
+{"id": "t183", "text": "A decorated christmas tree with lights in a living room corner.", "kind": "document"}
+{"id": "t184", "text": "A full moon rises above dark rooftops.", "kind": "document"}
+{"id": "t185", "text": "A screenshot of a recipe with a list of ingredients and steps.", "kind": "document"}
+{"id": "t186", "text": "A news article screenshot with a headline and a photo.", "kind": "document"}
+{"id": "t187", "text": "An error dialog on a computer screen says the file could not be saved.", "kind": "document"}
+{"id": "t188", "text": "A phone lock screen shows the time and a few notifications.", "kind": "document"}
+{"id": "t189", "text": "A dashboard with a glowing check engine warning light.", "kind": "document"}
+{"id": "t190", "text": "A dented car bumper photographed for an insurance claim.", "kind": "document"}
+{"id": "t191", "text": "A horse grazes in a fenced field at the edge of a forest.", "kind": "document"}
+{"id": "t192", "text": "Ocean waves crash against dark rocks on a windy day.", "kind": "document"}
+{"id": "t193", "text": "A wooden fishing boat is tied up in a small harbor.", "kind": "document"}
+{"id": "t194", "text": "An overexposed photo where the sky and faces are washed out white.", "kind": "document"}
+{"id": "t195", "text": "A hiking trail winds through a dense green forest.", "kind": "document"}
+{"id": "t196", "text": "A pair of white sneakers on a store shelf.", "kind": "document"}
+{"id": "t197", "text": "A person in a winter coat walks through falling snow.", "kind": "document"}
+{"id": "t198", "text": "A tax form with boxes filled in by hand and a signature line.", "kind": "document"}
+{"id": "t199", "text": "Last summer we cleaned out the camera roll on my phone before a long trip, and it took most of a weekend. There were thousands of screenshots of chats, boarding passes, parking receipts and recipes that nobody would ever look at again, plus long bursts of almost identical photos from a birthday party, a few dozen pictures that were completely black because the phone had been in a pocket, and blurry shots of the dog running across the beach at sunset. We wanted to keep the good family photos, the landscapes from the mountain hike and the pictures of the food at the little restaurant by the harbor, but delete everything else, and we wished the phone could simply understand what was in each picture and suggest what to remove without sending anything to the cloud.", "kind": "document"}
