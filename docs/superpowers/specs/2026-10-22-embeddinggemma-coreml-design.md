@@ -111,7 +111,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | min cosine ≥ 0.995, and ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
 | **s4_compress** | int8 weights first, then 4-bit palettization. Keep the smallest variant that passes | min cosine ≥ 0.99, recall@10 ≥ 0.95, 5th-percentile (over the 120 app queries) Spearman ρ of the top-50 ≥ 0.9, ranking the reference top-50 inside the new full ranking, full download ≤ 300 MB |
-| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255; end-to-end min cosine ≥ 0.99 against s0 |
+| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255 (p99, on decode-identical inputs: synthetic and PNG; JPEG decoding differs between ImageIO and PIL and is recorded, see ADR-0004); end-to-end min cosine ≥ 0.99 against s0 |
 | **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target, not gated |
 | **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
 
@@ -190,11 +190,11 @@ public final class VectorIndex {
 ```
 
 - **Why a class:** at 50k × 256 the index is 51 MB; a `Sendable` struct would copy it silently on the first mutation of any shared copy. The app wraps the one instance in an actor.
-- **Tokenizer:** `swift-transformers` `Tokenizers`, loaded from the bundled `tokenizer.json`.
+- **Tokenizer:** `swift-transformers` `Tokenizers`, loaded from `tokenizer.json`. It is 32 MB, so it is not bundled: it ships in the published model folder and `ModelStore` downloads it with the model.
 - **`.auto` budget:** 280 on A17 Pro and newer, 70 otherwise. Mapping lives in `DeviceTier.swift`.
 - **`defaultRepo`:** a constant set from `HF_REPO` in the `justfile`. The Hugging Face account is confirmed at s7, before the first upload.
 - **Index file (version 2):** little-endian header (magic, version, dims, count, modelRevision), padded so the FP16 block starts 16-byte aligned, then the FP16 vectors, then an id table (JSON). Memory-mapped on load and widened straight into the single in-memory `[Float]` buffer; saved by streaming chunks to a temp file and renaming; search uses `vDSP` / `BLAS` dot products. 50k × 256 must search in < 20 ms on an iPhone 12 (unit benchmark on macOS as a proxy, verified in s6).
-- **ModelStore:** resumable `URLSession` background download into Application Support/EmbeddingGemma/<revision>/. SHA-256 is checked against `checksums.json` from the same HF revision. The previous revision is kept until the new one verifies.
+- **ModelStore:** the published folder is an uncompressed `EmbeddingGemma2.mlpackage/`, `tokenizer/` and `files.json` (`[{path, size, sha256}]`); there is no system unzip on iOS. Each file is a resumable `URLSession` download task (resume data kept on error or cancellation; a default session, not a background one, so it works in a library and in tests), checked against its size and SHA-256 from `files.json` at the same pinned revision, then the package is compiled into Application Support/EmbeddingGemma/<revision>/. The previous revision is kept until the new one is verified and compiled. `.file(URL)` takes a local folder with the same layout.
 - **Errors:** `EmbeddingGemmaError` with `.downloadFailed(underlying)`, `.checksumMismatch(file)`, `.unsupportedOS`, `.modelLoadFailed(underlying)`, `.revisionMismatch(expected, found)`, `.invalidImage`.
 - **Tests:** tokenizer parity (fixtures), preprocessing parity (fixtures), end-to-end parity on macOS against s4 artifacts (skipped with a clear message if artifacts are missing), index round-trip, revision mismatch, top-k correctness against brute force.
 

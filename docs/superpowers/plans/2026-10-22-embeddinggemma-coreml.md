@@ -1207,23 +1207,23 @@ let package = Package(
   ],
   dependencies: [.package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0")],
   targets: [
-    .target(name: "EmbeddingGemma", dependencies: [.product(name: "Tokenizers", package: "swift-transformers")],
-            resources: [.copy("Resources/tokenizer")]),
+    .target(name: "EmbeddingGemma", dependencies: [.product(name: "Tokenizers", package: "swift-transformers")]),
     .target(name: "EmbeddingIndex"),
     .executableTarget(name: "egcm-parity", dependencies: ["EmbeddingGemma"]),
-    .testTarget(name: "EmbeddingGemmaTests", dependencies: ["EmbeddingGemma"]),
+    .testTarget(name: "EmbeddingGemmaTests", dependencies: ["EmbeddingGemma"], exclude: ["Fixtures"]),
     .testTarget(name: "EmbeddingIndexTests", dependencies: ["EmbeddingIndex"]),
   ]
 )
 ```
 
-  Check the latest swift-transformers tag with `gh api repos/huggingface/swift-transformers/releases/latest --jq .tag_name` and use that as the `from:` version. Copy `tokenizer.json` and `tokenizer_config.json` from `artifacts/hf/` into `Sources/EmbeddingGemma/Resources/tokenizer/` (this is committed: about 30 MB. If it's over 20 MB, download it with the model instead and keep it out of git: `ModelStore` fetches it from the same HF revision).
+  Check the latest swift-transformers tag with `gh api repos/huggingface/swift-transformers/releases/latest --jq .tag_name` and use that as the `from:` version. **Tokenizer (decided in Task 16):** `tokenizer.json` is 32.2 MB at `HF_REVISION`, over the 20 MB limit, so it is not committed and there is no resource bundle. It ships in the published model folder (`tokenizer/tokenizer.json`, `tokenizer/tokenizer_config.json`, listed in `files.json`), so `ModelStore` downloads and verifies it with the model. The tests download it from `google/embeddinggemma-2` at `HF_REVISION` into the gitignored `artifacts/tokenizer/<revision>/` and check its sha256 (the LFS oid).
 - [ ] **Step 2: `Buckets.swift`** mirrors `egcm/buckets.py` exactly (same ten-bucket table, same thresholds 0.6 / 0.83 / 1.2 / 1.67 with the same inclusive and exclusive edges). Test `BucketsTests` with the same cases as `tests/test_buckets.py`.
 - [ ] **Step 3: `ImagePreprocessor.swift`.**
   - Input `CGImage` → choose the bucket → resize to the bucket size with vImage `vImageScale_ARGB8888` and `kvImageHighQualityResampling` (Lanczos-like).
   - **The parity question:** the reference uses torchvision bicubic + antialias. The test compares Swift against s0's `pixel_values` for 20 images within `s5.max_pixel_abs_diff` (1/255 per pixel, 99th percentile). If vImage misses it, implement separable antialiased bicubic (a = −0.5, matching torch's `upsample_bicubic2d_aa`) with Accelerate on planar float buffers. That's the fallback, and `ImagePreprocessorTests` decides.
+  - **Outcome (Task 16, ADR-0004):** vImage missed (p99 11/255). The fallback is a port of torch's *uint8* path (int16 fixed-point weights, horizontal pass first, uint8 intermediate), run with Accelerate in exact Double arithmetic; it is bit-exact against torch on lossless inputs. JPEG decoding itself differs between ImageIO and PIL (p99 2/255 after the resize), so the 1/255 gate is taken on decode-identical inputs (synthetic images from `export_fixtures.py` and the PNG fixtures) and the JPEG number is recorded.
   - Output `MLMultiArray` `[1,3,H,W]` Float32 in 0–1. Draw into an sRGB `CGContext` first so orientation and colour space are normalized.
-- [ ] **Step 4: `TextEncoder.swift`.** Load `AutoTokenizer.from(modelFolder:)` from the resource folder; `encode(text:prompt:) -> [Int32]`, prepending the prompt string. Pad to the smallest length in [16, 32, 64, 128] and truncate at 128. The mask is 1 for real tokens. Tests: for 50 fixture texts, the ids equal s0's ids exactly. The fixture ids are exported by a small script `stages/s5_swift/export_fixtures.py` to `swift/Tests/EmbeddingGemmaTests/Fixtures/text_ids.json` (committed, small).
+- [ ] **Step 4: `TextEncoder.swift`.** Load `AutoTokenizer.from(modelFolder:)` from the resource folder; `encode(text:prompt:) -> [Int32]`, prepending the prompt string. Pad to the smallest length in [16, 32, 64, 128] and truncate at 128. The mask is 1 for real tokens. Tests: for all 200 fixture texts, the ids equal s0's ids exactly. Truncation keeps `<bos>`, the first 126 tokens and `<eos>`. The fixture ids are exported by a small script `stages/s5_swift/export_fixtures.py` to `swift/Tests/EmbeddingGemmaTests/Fixtures/text_ids.json` (committed, small).
 - [ ] **Step 5: Run it.** `cd swift && swift test --filter "Buckets|TextEncoder|ImagePreprocessor"`. Expected: PASS.
 - [ ] **Step 6: Commit.** `git commit -am "feat(swift): tokenizer, buckets, preprocessing parity"`
 
@@ -1315,7 +1315,7 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 - [ ] **Step 1: The `egcm-parity` CLI.** Arguments: `--model <s4 mlpackage dir> --fixtures <repo>/fixtures --out <json>`. It compiles the model, then for every fixture text computes token ids and an embedding (768, unnormalized-truncation-free), and for every image at both budgets computes pixels and an embedding. It writes JSON `{texts: {id: {ids, emb}}, images: {id_budget: {emb, pixel_sample}}}`. `pixel_sample` = 4096 deterministic pixel values: stride-sampled from the `[1,3,H,W]` tensor.
 - [ ] **Step 2: `run.py`** (`# group: convert`). Run `swift run -c release egcm-parity ...`. Compare:
   - ids against s0 (exact) → `token_ids_identical` (bool, gate `==`);
-  - pixel samples against the same stride samples of s0's unpatchified pixels → `max_pixel_abs_diff` as the 99th percentile;
+  - pixel samples against the same samples of the reference pixels → `max_pixel_abs_diff` as the 99th percentile, **over decode-identical inputs only** (ADR-0004): the PNG fixtures against s0, plus the synthetic images of `export_fixtures.py` against torch's uint8 resize. The JPEG fixtures' decode-inclusive p99 goes to `details.jpeg_pixel_p99`, not gated;
   - embeddings against s0 → `min_cosine` (minimum over text and image vectors combined).
 
   `token_ids_identical = true` is already in `[s5_swift]` (ADR-0003). Report via `run_stage("s5_swift", fill)`.
@@ -1371,8 +1371,8 @@ def test_gates_change_needs_adr():
   1. Refuse unless `--confirm` is given **and** s0–s6 reports have `status == "passed"` and are not stale per `egcm.provenance.is_stale`. Write its own report with `run_stage("s7_publish", fill)` with `metrics.confirmed = True` only when `--confirm` was given and the upstream check passed.
   2. Read `HF_REPO_TARGET` from the environment and exit with a message if it's unset.
   3. Create the HF model repo (public) via `huggingface_hub.create_repo(exist_ok=True)`.
-  4. Upload the uncompressed `EmbeddingGemma2.mlpackage/` directory plus `files.json`, the tokenizer files, a README model card (base model, license Apache-2.0, parity table from RESULTS.md, usage via the Swift package) and `NOTICE`.
-  5. Record the resulting commit SHA as `revision` and write `swift/Sources/EmbeddingGemma/DefaultModel.swift`: `public extension EmbeddingGemma { static let defaultRepo = "<target>"; static let defaultRevision = "<sha>" }`.
+  4. Upload the uncompressed `EmbeddingGemma2.mlpackage/` directory plus `files.json` (a JSON array of `{"path", "size", "sha256"}` for every other file, sorted by path; the same format as `FilesManifest.write` in Swift), `tokenizer/tokenizer.json` and `tokenizer/tokenizer_config.json` from `HF_REVISION`, a README model card (base model, license Apache-2.0, parity table from RESULTS.md, usage via the Swift package) and `NOTICE`.
+  5. Record the resulting commit SHA as `revision` and rewrite `swift/Sources/EmbeddingGemma/DefaultModel.swift` (it exists from Task 17 with placeholder values): `public extension EmbeddingGemma { static let defaultRepo = "<target>"; static let defaultRevision = "<sha>" }`.
   6. `git tag v1.0.0`, `gh repo edit --visibility public --accept-visibility-change-consequences`, push the tags, and `gh release create v1.0.0 --notes-file docs/RESULTS.md`.
 - [ ] **Step 2: Don't run it in this plan.** It runs after the founder approves with the final numbers. The HF token comes from the founder via a secure prompt (`request_secret`) or their logged-in `hf` CLI.
 - [ ] **Step 3: Commit.** `git commit -am "feat(s7): guarded publish"`
