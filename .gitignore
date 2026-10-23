@@ -1,0 +1,11 @@
+artifacts/
+*.mlpackage
+*.mlmodelc
+.venv/
+__pycache__/
+.build/
+*.safetensors
+Examples/PhotoSearchDemo/*.xcodeproj
+.DS_Store
+.pytest_cache/
+.ruff_cache/

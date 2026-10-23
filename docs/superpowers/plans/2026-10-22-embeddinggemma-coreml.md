@@ -9,7 +9,7 @@
 - A plain-PyTorch, Neural-Engine-shaped rewrite of the text and vision towers, loaded from Google's safetensors and converted with coremltools into one multifunction `.mlpackage`.
 - A SwiftPM package that runs it.
 
-**Tech stack:** Python 3.12 + uv, torch, coremltools, safetensors, numpy, pydantic, pytest; `transformers@main` + `sentence-transformers>=6.1` (reference only). Swift 6, SwiftPM, swift-transformers (Tokenizers), Accelerate, Core ML. `just`, GitHub Actions (macOS).
+**Tech stack:** Python 3.12 + uv, torch, coremltools, safetensors, numpy, pydantic, pytest; `transformers==5.20.2` + `sentence-transformers>=6.1` (reference only). Swift 6, SwiftPM, swift-transformers (Tokenizers), Accelerate, Core ML. `just`, GitHub Actions (macOS).
 
 **Spec:** `docs/superpowers/specs/2026-10-22-embeddinggemma-coreml-design.md`. Read it first.
 
@@ -54,18 +54,22 @@
 1. Convert to RGB, then resize with bicubic + antialias (`resample: 3`) to the largest size that keeps aspect ratio, whose sides are multiples of 48, and whose area is ≤ budget·9·256.
 2. Rescale by 1/255; no normalization.
 
-**Buckets (exact fixed points of that resize, so the reference and our model see identical pixels):**
+**Buckets (exact fixed points of that resize, so the reference and our model see identical pixels).** Ten buckets: five aspect ratios for each budget. `docs/decisions/ADR-0002-image-buckets.md` has the patch grids, stretch figures and rationale.
 
 | Budget | Bucket | Size (H×W px) | Soft tokens |
 |---|---|---|---|
+| 70 | tall | 576×240 | 12×5 = 60 |
 | 70 | portrait | 480×336 | 10×7 = 70 |
-| 70 | landscape | 336×480 | 7×10 = 70 |
 | 70 | square | 384×384 | 8×8 = 64 |
+| 70 | landscape | 336×480 | 7×10 = 70 |
+| 70 | wide | 240×576 | 5×12 = 60 |
+| 280 | tall | 1152×528 | 24×11 = 264 |
 | 280 | portrait | 960×672 | 20×14 = 280 |
-| 280 | landscape | 672×960 | 14×20 = 280 |
 | 280 | square | 768×768 | 16×16 = 256 |
+| 280 | landscape | 672×960 | 14×20 = 280 |
+| 280 | wide | 528×1152 | 11×24 = 264 |
 
-**Bucket choice from the aspect ratio `r = W/H`:** `r < 0.83` → portrait; `r > 1.2` → landscape; otherwise square.
+**Bucket choice from the aspect ratio `r = W/H`:** `r < 0.6` → tall; `0.6 ≤ r < 0.83` → portrait; `0.83 ≤ r ≤ 1.2` → square; `1.2 < r ≤ 1.67` → landscape; `r > 1.67` → wide. `choose_bucket(height, width, budget)` takes the height first.
 
 ## Neural Engine rewrite rules (from Apple's `ml-ane-transformers`)
 
@@ -87,8 +91,10 @@ embeddinggemma-coreml/
   vendor/reference/*.py                 # read-only upstream copies (Task 1)
   egcm/__init__.py
   egcm/paths.py                         # all filesystem locations
-  egcm/report.py                        # Report schema, write/read, gate checks
-  egcm/gates.py                         # load gates.toml
+  egcm/report.py                        # Report schema, atomic write/read (no gate logic)
+  egcm/gates.py                         # load gates.toml (gates, targets), evaluate(report, stage_key)
+  egcm/provenance.py                    # git sha, code_hash, inputs_sha256, is_stale, STAGE_INPUTS
+  egcm/stage.py                         # run_stage(stage_key, fn): the runner every stage uses
   egcm/metrics.py                       # cosine, recall@k, spearman
   egcm/config.py                        # typed model config from HF config.json
   egcm/buckets.py                       # bucket table + selection + resize-size math
@@ -111,11 +117,12 @@ embeddinggemma-coreml/
   stages/s5_swift/{README.md,run.py}
   stages/s6_device/{README.md,run.py}
   stages/s7_publish/{README.md,run.py}
-  scripts/gen_status.py  scripts/gen_results.py  scripts/check_gates_adr.py  scripts/check_large_files.py
-  tests/test_report.py  tests/test_metrics.py  tests/test_buckets.py  tests/test_norm.py
+  scripts/__init__.py  scripts/gen_status.py  scripts/gen_results.py  scripts/check_gates_adr.py  scripts/check_large_files.py
+  tests/conftest.py  tests/test_report.py  tests/test_gates.py  tests/test_provenance.py  tests/test_stage.py
+  tests/test_scripts.py  tests/test_metrics.py  tests/test_buckets.py  tests/test_norm.py
   tests/test_rope.py  tests/test_weights_map.py  tests/test_gates_adr.py
   fixtures/images/*.{jpg,png}  fixtures/images.jsonl  fixtures/texts.jsonl  fixtures/MANIFEST.sha256
-  docs/decisions/ADR-0001-ane-rewrite.md  docs/decisions/ADR-0002-image-buckets.md  docs/RESULTS.md
+  docs/decisions/ADR-0001-ane-rewrite.md  docs/decisions/ADR-0002-image-buckets.md  docs/decisions/ADR-0003-initial-gate-set.md  docs/RESULTS.md
   swift/Package.swift
   swift/Sources/EmbeddingGemma/{EmbeddingGemma.swift,EmbeddingTask.swift,Errors.swift,DeviceTier.swift,
        Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,ModelStore.swift,Checksums.swift}
@@ -128,6 +135,8 @@ embeddinggemma-coreml/
 ---
 
 ### Task 1: Repo scaffold, agent docs, toolchain
+
+> **Implemented, then amended after code review.** The code blocks below are the original draft; the files in the repo are authoritative. Changes: torch pinned to 2.7.0 and coremltools to 9.0 (coremltools 9.0 sets `_TORCH_MAX_VERSION = "2.7.0"`); `gates.toml` tables are keyed by full stage name with the missing keys added (ADR-0003); the `stage` recipe is strict and runs under `uv run --exact --group <g>`; scripts run as `python -m scripts.<name>`; ruff is configured; `vendor/reference/SOURCE.txt` records the transformers commit.
 
 **Files:** create `pyproject.toml`, `.gitignore`, `justfile`, `gates.toml`, `AGENTS.md`, `CLAUDE.md`, `LICENSE`, `NOTICE`, `vendor/reference/*`, `egcm/__init__.py`, `egcm/paths.py`.
 
@@ -143,7 +152,7 @@ dependencies = ["numpy>=2", "pydantic>=2.7", "safetensors>=0.4", "pillow>=11", "
 
 [dependency-groups]
 convert = ["torch", "coremltools>=9", "pytest>=8"]
-reference = ["torch", "transformers @ git+https://github.com/huggingface/transformers@main", "sentence-transformers>=6.1", "torchvision", "pytest>=8"]
+reference = ["torch", "transformers==5.20.2", "sentence-transformers>=6.1", "torchvision", "pytest>=8"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [tool.uv]
@@ -171,29 +180,59 @@ Examples/PhotoSearchDemo/*.xcodeproj
 - [ ] **Step 5: Write `gates.toml`** (values from the spec §5).
 
 ```toml
-[s0]
+# Every threshold lives here. Changing this file needs a new docs/decisions/ADR-*.md in the same commit.
+#
+# Each table is keyed by the full stage name. The comparison direction comes from the key:
+#   min_*  -> metric >= value
+#   max_*  -> metric <= value
+#   bool   -> metric == value
+# Any other key raises when the file is loaded. The prefix is the direction only; each metric's
+# docstring (egcm/metrics.py) or stage README defines how it is aggregated.
+# A "targets" subtable holds recorded-only numbers; it is never gated.
+
+[s0_reference]
+license_apache = true
+key_inventory_written = true
 deterministic = true
-[s1]
+
+[s1_rewrite]
+strict_load = true
 min_cosine_text = 0.9999
 min_cosine_image = 0.9999
-[s2]
+
+[s2_coreml_fp32]
 min_cosine_text = 0.9999
 min_cosine_image = 0.9999
-[s3]
+
+[s3_coreml_ane]
 min_cosine_text = 0.995
 min_cosine_image = 0.995
 min_ane_fraction = 0.95
-[s4]
+
+[s4_compress]
+# min_cosine is the minimum over text and image vectors combined.
 min_cosine = 0.99
 min_recall_at_10 = 0.95
-min_spearman_top50 = 0.9
+# 5th percentile over the 120 app queries (see egcm.metrics.spearman_topk).
+min_p5_spearman_top50 = 0.9
 max_download_mb = 300
-[s5]
+
+[s5_swift]
+token_ids_identical = true
+# 1/255 rounded up.
 max_pixel_abs_diff = 0.003922
+# Minimum over text and image vectors combined.
 min_cosine = 0.99
-[s6]
+
+[s6_device]
 max_peak_rss_mb = 800
+min_devices = 1
+
+[s6_device.targets]
 target_ms_per_image_70 = 60
+
+[s7_publish]
+confirmed = true
 ```
 
 - [ ] **Step 6: Write `egcm/paths.py`.**
@@ -219,40 +258,66 @@ def stage_dir(stage: str) -> Path:
 set shell := ["bash", "-euo", "pipefail", "-c"]
 stages := "s0_reference s1_rewrite s2_coreml_fp32 s3_coreml_ane s4_compress s5_swift s6_device s7_publish"
 
+# Sync the convert environment and, once swift/ exists, resolve the Swift package.
+# The reference environment is not synced here: `just stage 0` installs it on first use (uv run --exact).
 setup:
     uv sync --group convert
-    cd swift && swift package resolve
+    if [ -d swift ]; then (cd swift && swift package resolve); fi
 
 status:
-    uv run python scripts/gen_status.py
+    uv run python -m scripts.gen_status
 
+# Run stage N in the environment named by line 1 of its run.py (`# group: convert` or `# group: reference`).
+# --exact makes the environment match that group alone, so reference-only packages (transformers) never
+# leak into convert stages. STATUS.md is always regenerated, and the stage's exit code is kept.
 stage n:
     #!/usr/bin/env bash
     set -euo pipefail
-    name=$(echo {{stages}} | tr ' ' '\n' | grep "^s{{n}}_")
-    group=$(head -1 stages/$name/run.py | sed -n 's/^# group: //p')
-    uv run --group "$group" python -m stages.$name.run
-    uv run python scripts/gen_status.py >/dev/null
+    case "{{n}}" in ''|*[!0-9]*) echo "error: stage must be a number, got '{{n}}'" >&2; exit 2;; esac
+    name=$(printf '%s\n' {{stages}} | grep -x 's{{n}}_.*' || true)
+    if [ -z "$name" ]; then
+        echo "error: no stage numbered {{n}}. Stages: {{stages}}" >&2
+        exit 2
+    fi
+    run="stages/$name/run.py"
+    if [ ! -f "$run" ]; then
+        echo "error: $run does not exist yet" >&2
+        exit 2
+    fi
+    group=$(head -1 "$run" | sed -n 's/^# group: *//p')
+    if [ -z "$group" ]; then
+        echo "error: line 1 of $run must be '# group: convert' or '# group: reference'" >&2
+        exit 2
+    fi
+    rc=0
+    uv run --exact --group "$group" python -m "stages.$name.run" || rc=$?
+    uv run --no-sync python -m scripts.gen_status >/dev/null || echo "warning: could not regenerate STATUS.md" >&2
+    exit "$rc"
 
 all:
     for n in 0 1 2 3 4 5; do just stage $n; done
 
 test:
-    uv run --group convert pytest -q
-    cd swift && swift test
+    uv run --exact --group convert pytest -q
+    if [ -d swift ]; then (cd swift && swift test); fi
+
+lint:
+    uv run --group dev ruff check .
 
 bench-device:
     just stage 6
 
 publish *flags:
-    uv run --group convert python -m stages.s7_publish.run {{flags}}
+    uv run --exact --group convert python -m stages.s7_publish.run {{flags}}
 ```
 
 - [ ] **Step 8: Write `AGENTS.md`** with the 7 rules from spec §4 verbatim, the command list, the stage table (spec §5), and a "Where things are" map (the file map above). Write `CLAUDE.md` containing only `See AGENTS.md.`
-- [ ] **Step 9: Copy the reference sources.** Download the three upstream files into `vendor/reference/`, pinned to a commit: get the SHA from `gh api repos/huggingface/transformers/commits/main --jq .sha` and save it in `vendor/reference/SOURCE.txt`. Add `LICENSE` (Apache-2.0 full text) and a `NOTICE` that credits Google (model) and Hugging Face (reference code).
+- [ ] **Step 9: Copy the reference sources.** Download the three upstream files into `vendor/reference/`, from the `v5.20.2` tag (the version the `reference` group installs); record the tag and its commit SHA (`gh api repos/huggingface/transformers/commits/v5.20.2 --jq .sha`) in `vendor/reference/SOURCE.txt`. Add `LICENSE` (Apache-2.0 full text) and a `NOTICE` that credits Google (model) and Hugging Face (reference code).
 - [ ] **Step 10: Commit.** `git add -A && git commit -m "chore: scaffold repo, gates, agent docs"`
 
 ### Task 2: Report schema and gate loading
+
+> **Implemented, then amended after code review.** The code blocks below are the original draft; the files in the repo are authoritative. Changes: `evaluate(report, stage_key)` lives in `egcm/gates.py` and loads its own gates (no `ops` argument; operator comes from the `min_`/`max_` prefix or a bool, anything else raises); `Report` is schema and atomic I/O only, forbids extra fields, has `status`, `git_dirty`, `code_hash`, and writes non-finite floats as strings; `egcm/provenance.py` and `egcm/stage.py` (`run_stage`) are new. **Every stage writes its report with `run_stage`, never with `Report(...)`, `evaluate` or `write_report` directly.**
 
 **Files:** create `egcm/report.py`, `egcm/gates.py`, `tests/test_report.py`.
 
@@ -350,6 +415,8 @@ def ops_for(g: dict) -> dict[str, str]:
 
 ### Task 3: Metrics
 
+> **Implemented, then amended after code review.** The code blocks below are the original draft; the files in the repo are authoritative. Changes: `recall_at_k` and `spearman_topk` take keyword-only `ref=(q, d), new=(q, d)` and raise `ValueError` if k exceeds the number of docs; `spearman_topk` ranks the reference top-k inside the new model's full stable ranking (intruders count) and returns the 5th percentile over queries (gate `min_p5_spearman_top50`); `recall_at_k` is the mean. Tests use hand-computed values.
+
 **Files:** create `egcm/metrics.py`, `tests/test_metrics.py`.
 
 - [ ] **Step 1: Write the failing test.**
@@ -412,6 +479,8 @@ def spearman_topk(q_ref, d_ref, q_new, d_new, k=50) -> float:
 
 ### Task 4: Buckets and resize math
 
+> **Implemented, then amended after code review.** The code blocks below are the original draft; the files in the repo are authoritative. Changes: ten buckets (tall and wide added), validated inputs, and tests that compare the port with the vendored upstream function.
+
 **Files:** create `egcm/buckets.py`, `tests/test_buckets.py`, `docs/decisions/ADR-0002-image-buckets.md`.
 
 - [ ] **Step 1: Write the failing test.**
@@ -424,14 +493,16 @@ def test_buckets_are_fixed_points():
         assert aspect_preserving_size(b.height, b.width, budget=b.budget) == (b.height, b.width)
         assert (b.height // 48) * (b.width // 48) == b.tokens
 
-def test_choose():
-    assert choose_bucket(4032, 3024, 70).name == "landscape"   # w/h=1.33
-    assert choose_bucket(3024, 4032, 70).name == "portrait"
+def test_choose():  # signature is (height, width, budget)
+    assert choose_bucket(3024, 4032, 70).name == "landscape"   # w/h = 1.33
+    assert choose_bucket(4032, 3024, 70).name == "portrait"
     assert choose_bucket(1000, 1000, 280).name == "square"
-    assert choose_bucket(1170, 2532, 70).name == "portrait"    # iPhone screenshot
+    assert choose_bucket(2532, 1170, 70).name == "tall"        # iPhone screenshot, 1170 wide x 2532 tall
+    assert choose_bucket(1080, 1920, 70).name == "wide"        # 16:9
 
 def test_matches_upstream_formula():
-    assert aspect_preserving_size(3024, 4032, budget=70) == (288, 384)
+    # f = sqrt(630*256 / (3024*4032)) = 0.11501 -> ideal 347.8 x 463.7 -> floor to multiples of 48 = 336 x 432
+    assert aspect_preserving_size(3024, 4032, budget=70) == (336, 432)
 ```
 
 - [ ] **Step 2: Run it.** Expected: FAIL (ImportError).
@@ -481,8 +552,10 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
     return next(b for b in BUCKETS if b.budget == budget and b.name == name)
 ```
 
-- [ ] **Step 4: Run it.** Expected: 3 passed. If `test_matches_upstream_formula` fails, recompute the expected value by hand from the formula; the test value must come from the formula, not from a guess.
-- [ ] **Step 5: Write ADR-0002.** Context: the upstream resize keeps aspect ratio, which gives variable shapes, and Core ML on the Neural Engine needs fixed shapes. Decision: six fixed-point buckets (table above). Consequence: about 10% aspect distortion at worst, measured by the s4 recall gate. Then commit: `git commit -am "feat: image buckets"`.
+(This draft code has three buckets per budget. The repo version has ten, the 0.6 / 0.83 / 1.2 / 1.67 thresholds above, and input validation.)
+
+- [ ] **Step 4: Run it.** Expected: pass. If `test_matches_upstream_formula` fails, recompute the expected value by hand from the formula; the test value must come from the formula, not from a guess. (The draft's `(288, 384)` was wrong, and the draft's `test_choose` passed width and height in the wrong order.)
+- [ ] **Step 5: Write ADR-0002.** Context: the upstream resize keeps aspect ratio, which gives variable shapes, and Core ML on the Neural Engine needs fixed shapes. Decision: ten fixed-point buckets (table above). Consequence: up to about 21% aspect stretch in the middle three buckets and none bounded in tall and wide (see the ADR table), measured by the s4 recall gate. Then commit: `git commit -am "feat: image buckets"`.
 
 ### Task 5: Fixtures (s0, part a)
 
@@ -500,7 +573,7 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
   - Every image is saved as JPEG q=92 (PNG for screenshots).
   - `fixtures/images.jsonl` rows: `{"id","file","category","source_url","license","author","height","width"}`.
   - Finally, write `MANIFEST.sha256` (`sha256  path` lines, sorted).
-- [ ] **Step 3: Run it.** `uv run --group reference python -m stages.s0_reference.build_fixtures`. Expected: about 200 files, the manifest written, and every Commons row has a license in {CC0, Public domain}.
+- [ ] **Step 3: Run it.** `uv run --exact --group reference python -m stages.s0_reference.build_fixtures`. Expected: about 200 files, the manifest written, and every Commons row has a license in {CC0, Public domain}.
 - [ ] **Step 4: Write `egcm/fixtures.py`** with `load_texts()`, `load_images()` (returns rows plus a PIL loader), and `verify_manifest() -> list[str]` (the mismatches). Add `tests/test_fixtures_manifest.py`, which asserts `verify_manifest() == []`.
 - [ ] **Step 5: Commit.** `git add fixtures stages/s0_reference/build_fixtures.py egcm/fixtures.py tests/test_fixtures_manifest.py && git commit -m "feat: CC0 fixtures"`. The total fixture size must stay under 60 MB. If it doesn't, downscale the Commons photos to a 1600-px max side at build time.
 
@@ -509,7 +582,7 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 **Files:** create `stages/s0_reference/run.py`, `stages/s0_reference/README.md`.
 
 - [ ] **Step 1: Write `run.py`** (first line `# group: reference`). It must:
-  1. Pin the revision: `huggingface_hub.HfApi().model_info(HF_REPO).sha` → `artifacts/s0_reference/revision.txt`. Download into `artifacts/hf/` with `snapshot_download(revision=sha)`.
+  1. Use the pinned revision `egcm.paths.HF_REVISION` (never look up `main`). Download into `artifacts/hf/` with `snapshot_download(HF_REPO, revision=HF_REVISION)` and write `artifacts/s0_reference/revision.txt`.
   2. Write the key inventory: open `model.safetensors` with `safetensors.safe_open` and dump `{key: [shape, dtype]}` to `keys.json`.
   3. Load `SentenceTransformer(path, model_kwargs={"torch_dtype": torch.float32}, config_kwargs={"audio_config": None})` on CPU, in `eval()` mode.
   4. **Texts:** for every fixture text, with the `query` prompt for kind=query and the `document` prompt otherwise, record `input_ids` (via `model.tokenize`), and `embedding = model.encode(text, prompt_name=..., normalize_embeddings=True)` at the full 768 dims. Save `texts.npz` (`ids_<id>` int32 arrays, `emb` [N,768] float32, `order` ids).
@@ -521,9 +594,9 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
   6. **Debug intermediates** for 2 fixtures (`t000`, plus the first image at budget 70): text `inputs_embeds`, `per_layer_inputs`, hidden after layers 0, 5 and 23, and the final pre-pool; vision patch-embed output, encoder layer 0 and 15, pooler output, `embed_vision` output. Use forward hooks. Save `debug.npz`.
   7. **Token layout:** save `image_token_layout.json` with the full `input_ids` for one image per bucket, mapped to token strings. It **must** show where `<|image>`, the placeholders, `<image|>` and any bos/eos sit.
   8. **Determinism:** run steps 4–5 twice on the first 10 items and assert bitwise equality → `metrics.deterministic = True`.
-  9. Write the report with `gate_values = gates("s0")`, plus `details = {"revision", "license": "apache-2.0", "embedding_path"}`. `inputs_sha256` = sha256 of `fixtures/MANIFEST.sha256` + the revision.
+  9. Wrap steps 1–8 in `fill(report)` and call `run_stage("s0_reference", fill)` (`egcm.stage`). `fill` sets `metrics` `deterministic`, `license_apache` (True when the model card license is `apache-2.0`) and `key_inventory_written`, and `details = {"revision", "license": "apache-2.0", "embedding_path"}`. Provenance, `inputs_sha256` (manifest + revision), evaluation against `[s0_reference]` and the exit code are `run_stage`'s job.
 - [ ] **Step 2: Run it.** `just stage 0`. Expected: report passes. `image_token_layout.json` shows the sequence. `keys.json` has `vision_tower.*`, `embed_vision.*` and `language_model.*` keys.
-- [ ] **Step 3: Write `stages/s0_reference/README.md`.** Input, outputs (the list above), gate, and known failure modes: "transformers main moved: pin the commit from `vendor/reference/SOURCE.txt` in pyproject"; "sentence-transformers `encode` dict input changed: use the manual pooling path".
+- [ ] **Step 3: Write `stages/s0_reference/README.md`.** Input, outputs (the list above), gate, and known failure modes: "transformers changed: the version is pinned in pyproject (`transformers==5.20.2`); if you bump it, re-vendor `vendor/reference/` from the same tag and diff the model code"; "sentence-transformers `encode` dict input changed: use the manual pooling path".
 - [ ] **Step 4: Update the plan facts.** If `image_token_layout.json` or `keys.json` contradict the facts at the top of this plan, update the "Facts" section in this file, in the same commit, before Task 7.
 - [ ] **Step 5: Commit.** `git commit -am "feat(s0): reference vectors and debug intermediates"` (artifacts stay gitignored).
 
@@ -1018,7 +1091,7 @@ def test_every_needed_key_mapped_and_no_audio():
   4. Run on `pixels` reconstructed from s0's `pixel_values`. Unpatchify with the inverse of `convert_image_to_patches` and check it reproduces s0's patches exactly, as a sanity check.
   5. Compare with `emb_bucket` → `min_cosine_image`.
   6. Also compare `debug.npz` intermediates and record per-tensor max abs diff in `details`. These are diagnostic, not gated.
-  7. Write the report.
+  7. Put these in `fill(report)` and call `run_stage("s1_rewrite", fill)`; set `metrics` `strict_load` (True when `load_state_dict(strict=True)` succeeded), `min_cosine_text` and `min_cosine_image`.
 - [ ] **Step 4: Run it.** `just stage 1`. Expected: pass at ≥ 0.9999. If it fails, the debug intermediates show the first diverging tensor; fix that module. The README lists the likely suspects: the patch flatten order, the axial RoPE half order, a missing layer_scalar, mask sign, or the PLE reshape order (layer-major vs dim-major: `reshape(S, L, P)` means layer-major, so `split(P, dim=1)` is correct).
 - [ ] **Step 5: Commit.** `git commit -am "feat(s1): weight mapping + rewrite parity"` and update STATUS.md (`just status`).
 
@@ -1058,7 +1131,7 @@ def merge_multifunction(parts: dict[str, Path], out_path: Path, default: str):
     ct.utils.save_multifunction(desc, str(out_path))
 ```
 
-- [ ] **Step 2: Write `stages/s2_coreml_fp32/run.py`.** Convert each text length and each of the 6 image buckets at `ct.precision.FLOAT32` into `artifacts/s2_coreml_fp32/parts/<fn>.mlpackage`. Merge into `EmbeddingGemma2.mlpackage`. Load each function with `ct.models.MLModel(path, function_name=fn, compute_units=ct.ComputeUnit.CPU_ONLY)`, predict all fixtures, compare with s0 → `min_cosine_text` / `min_cosine_image`. Record the package size in MB.
+- [ ] **Step 2: Write `stages/s2_coreml_fp32/run.py`.** Convert each text length and each of the 10 image buckets at `ct.precision.FLOAT32` into `artifacts/s2_coreml_fp32/parts/<fn>.mlpackage`. Merge into `EmbeddingGemma2.mlpackage`. Load each function with `ct.models.MLModel(path, function_name=fn, compute_units=ct.ComputeUnit.CPU_ONLY)`, predict all fixtures, compare with s0 → `min_cosine_text` / `min_cosine_image`. Record the package size in MB. Report via `run_stage("s2_coreml_fp32", fill)`.
 - [ ] **Step 3: Run it.** `just stage 2`. Expected: pass. Known failure modes (README):
   - `einsum` pattern unsupported → rewrite as matmul with explicit transposes.
   - The int64 gather on `table` → cast ids to int32 (already int32); if the gather still fails, use `torch.index_select`.
@@ -1075,10 +1148,11 @@ def merge_multifunction(parts: dict[str, Path], out_path: Path, default: str):
   - cosines against s0;
   - **Neural Engine fraction**: `ct.models.compute_plan.MLComputePlan.load_from_path(compiled_path, compute_units=CPU_AND_NE)`, then iterate the program's operations, get `get_compute_device_usage_for_mlprogram_operation(op).preferred_compute_device`, and count `MLNeuralEngineComputeDevice` over all ops that have a usage (the minimum over functions).
   - Compile first with `ct.utils.compile_model`.
+  - Report via `run_stage("s3_coreml_ane", fill)`, with `min_cosine_text`, `min_cosine_image`, `min_ane_fraction`.
 - [ ] **Step 4: Run it.** `just stage 3`. If cosine fails:
   1. Read probe.json and check that the residual stream itself (not just norm inputs) exceeds 30000. If it does, apply mitigation (b): scale the embeddings and every residual add by `1/s`. RMSNorm after it is invariant, `layer_scalar` is unchanged, and the final `norm` is invariant, so this is exact math. Implement it as a `residual_scale` constructor arg on `TextTower`/`Layer` that divides `emb` and nothing else. Since every sub-block output is re-normalized by post-norms (whose weights then produce full-scale values), also divide each post-norm weight by `s`.
   2. If (b) still isn't enough, use mitigation (c): `op_selector` keeps the flagged ops FP32 (`ct.transform.FP16ComputePrecision(op_selector=...)`), then re-measure the Neural Engine fraction.
-  3. If it still fails at ≥ 95%, take the **GPU fallback**: ADR-0003, convert with `compute_units=CPU_AND_GPU` gating, and change `gates.toml` `s3.min_ane_fraction` → `0` **with ADR-0003 in the same commit**.
+  3. If it still fails at ≥ 95%, take the **GPU fallback**: ADR-0004 (ADR-0003 is the initial gate set), convert with `compute_units=CPU_AND_GPU` gating, and change `gates.toml` `[s3_coreml_ane] min_ane_fraction` → `0` **with ADR-0004 in the same commit**.
 - [ ] **Step 5: Commit** the passing state: `git commit -am "feat(s3): fp16 ANE conversion with probe-driven prescales"`.
 
 ### Task 15: s4 compression
@@ -1102,10 +1176,10 @@ def palettize4(m):
 
 - [ ] **Step 2: Write `run.py`.** Start from the s3 parts. Produce the variants `int8` and `pal4`, and the mixed `pal4` + embedding table at int8 (an `op_name_configs` override for the gather `const`). Then for each variant:
   1. merge the multifunction package;
-  2. compute cosines, recall@10 and spearman_top50, with `q` = the 120 query texts and `d` = the bucketed images at budget 70 and, separately, at 280. Both must pass. Use the reference `q_ref`/`d_ref` from s0 **raw** (exact-aspect) image vectors, so bucketing distortion is included;
+  2. compute cosines, recall@10 and the 5th-percentile Spearman of the top 50, with `q` = the 120 query texts (`kind=query` only; the 80 document-style texts are not used for ranking) and `d` = the bucketed images at budget 70 and, separately, at 280. Both must pass. Call `recall_at_k(ref=(q_ref, d_ref), new=(q, d), k=10)` and `spearman_topk(ref=..., new=..., k=50)`; the metrics are `min_recall_at_10` and `min_p5_spearman_top50`, and `min_cosine` is the minimum over text and image vectors combined. Use the reference `q_ref`/`d_ref` from s0 **raw** (exact-aspect) image vectors, so bucketing distortion is included;
   3. measure the download size as the zipped `.mlpackage` (`shutil.make_archive`).
 
-  Pick the smallest variant that passes everything. Write `artifacts/s4_compress/EmbeddingGemma2.mlpackage` plus `checksums.json` (sha256 per file inside the zip and of the zip itself). Record every variant's metrics in details.
+  Pick the smallest variant that passes everything. Report the winning variant's metrics through `run_stage("s4_compress", fill)`. Write `artifacts/s4_compress/EmbeddingGemma2.mlpackage` plus `checksums.json` (sha256 per file inside the zip and of the zip itself). Record every variant's metrics in details.
 - [ ] **Step 3: Run it.** `just stage 4`. If recall fails only because of bucketing (raw vs bucket recall at FP32 in s1 also below 0.95), go back to ADR-0002 and add buckets: an extra 3:4 portrait at 70 = 432×336 (9×7 = 63 tokens). Never relax the gate.
 - [ ] **Step 4: Commit.** `git commit -am "feat(s4): compressed variants + selection"`
 
@@ -1138,7 +1212,7 @@ let package = Package(
 ```
 
   Check the latest swift-transformers tag with `gh api repos/huggingface/swift-transformers/releases/latest --jq .tag_name` and use that as the `from:` version. Copy `tokenizer.json` and `tokenizer_config.json` from `artifacts/hf/` into `Sources/EmbeddingGemma/Resources/tokenizer/` (this is committed: about 30 MB. If it's over 20 MB, download it with the model instead and keep it out of git: `ModelStore` fetches it from the same HF revision).
-- [ ] **Step 2: `Buckets.swift`** mirrors `egcm/buckets.py` exactly (same table, same thresholds 0.83/1.2). Test `BucketsTests` with the same cases as `tests/test_buckets.py`.
+- [ ] **Step 2: `Buckets.swift`** mirrors `egcm/buckets.py` exactly (same ten-bucket table, same thresholds 0.6 / 0.83 / 1.2 / 1.67 with the same inclusive and exclusive edges). Test `BucketsTests` with the same cases as `tests/test_buckets.py`.
 - [ ] **Step 3: `ImagePreprocessor.swift`.**
   - Input `CGImage` → choose the bucket → resize to the bucket size with vImage `vImageScale_ARGB8888` and `kvImageHighQualityResampling` (Lanczos-like).
   - **The parity question:** the reference uses torchvision bicubic + antialias. The test compares Swift against s0's `pixel_values` for 20 images within `s5.max_pixel_abs_diff` (1/255 per pixel, 99th percentile). If vImage misses it, implement separable antialiased bicubic (a = −0.5, matching torch's `upsample_bicubic2d_aa`) with Accelerate on planar float buffers. That's the fallback, and `ImagePreprocessorTests` decides.
@@ -1236,9 +1310,9 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 - [ ] **Step 2: `run.py`** (`# group: convert`). Run `swift run -c release egcm-parity ...`. Compare:
   - ids against s0 (exact) → `token_ids_identical` (bool, gate `==`);
   - pixel samples against the same stride samples of s0's unpatchified pixels → `max_pixel_abs_diff` as the 99th percentile;
-  - embeddings against s0 → `min_cosine`.
+  - embeddings against s0 → `min_cosine` (minimum over text and image vectors combined).
 
-  Add `token_ids_identical = true` to `gates.toml [s5]` with ADR-0004 ("s5 exact token gate added").
+  `token_ids_identical = true` is already in `[s5_swift]` (ADR-0003). Report via `run_stage("s5_swift", fill)`.
 - [ ] **Step 3: Run it.** `just stage 5`. Expected: pass.
 - [ ] **Step 4: Commit.** `git commit -am "feat(s5): swift end-to-end parity"`
 
@@ -1254,14 +1328,14 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
   1. `xcodegen` + `xcodebuild -scheme PhotoSearchDemo -destination 'id=<udid>' build`, where the UDID is the first `xcrun devicectl list devices` entry with `Reality == physical`. Fail with "connect an iPhone with Developer Mode" if there is none.
   2. `xcrun devicectl device install app`, then `xcrun devicectl device process launch --console <bundle> -benchmark`.
   3. Poll `xcrun devicectl device copy from --domain-type appDataContainer --domain-identifier <bundle> --source Documents/s6_device.json` every 15 s for up to 30 min.
-  4. Write the report, with `max_peak_rss_mb` gated and the target ms recorded.
+  4. `fill(report)` for `run_stage("s6_device", fill)` sets `max_peak_rss_mb` (the maximum over devices) and `min_devices` (the number of devices with a result file), and puts the measured ms per image in `details` next to `egcm.gates.targets("s6_device")["target_ms_per_image_70"]`. The target is recorded, never gated.
   5. **The first run needs photos on the device**, which the founder's phone has. Photos permission must be granted once by hand on the device: the script prints "Tap Allow Full Access on the phone" and waits.
 - [ ] **Step 4: Run it.** `just stage 6` with the iPhone connected. Expected: report written.
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "feat(s6): device benchmark"` and commit `artifacts/s6_device/report.json` copied to `docs/results/s6_<device>.json` (reports are small; RESULTS.md reads them).
 
 ### Task 21: STATUS, RESULTS, the gates-ADR check, CI
 
-**Files:** create `scripts/gen_status.py`, `scripts/gen_results.py`, `scripts/check_gates_adr.py`, `scripts/check_large_files.py`, `tests/test_gates_adr.py`, `.github/workflows/ci.yml`.
+**Files:** extend `scripts/gen_status.py` (a minimal version exists: it lists reports with status, passed and stale, and writes STATUS.md); create `scripts/gen_results.py`, `scripts/check_gates_adr.py`, `scripts/check_large_files.py`, `tests/test_gates_adr.py`, `.github/workflows/ci.yml`.
 
 - [ ] **Step 1: Write the failing test** for `check_gates_adr` (a pure function over a list of changed paths):
 
@@ -1276,10 +1350,10 @@ def test_gates_change_needs_adr():
 
 - [ ] **Step 2: Implement the scripts.**
   - `violates(paths) = "gates.toml" in paths and not any(p.startswith("docs/decisions/ADR-") for p in paths)`. `main()` reads `git diff --name-only origin/main...HEAD` (CI) or `HEAD~1` locally.
-  - `gen_status.py` reads every `artifacts/s*/report.json` plus `docs/results/*.json`. It renders a table (stage | pass | key metrics | git_sha | stale?), where stale means `git_sha != HEAD` *and* files under `egcm/` or `stages/` changed since then. It writes STATUS.md and prints it, and lists "Next: just stage N" for the first non-passing stage.
+  - `gen_status.py` already reads every `artifacts/s*/report.json` and marks staleness with `egcm.provenance.is_stale` (code hash or inputs hash changed). Extend it to also read `docs/results/*.json` and show key metrics in the table. It writes STATUS.md, prints it, and lists "Next: just stage N" for the first stage that is not passed and current.
   - `gen_results.py` writes `docs/RESULTS.md` from the reports, including every s4 variant.
   - `check_large_files.py` fails on any tracked file over 5 MB, except `fixtures/images/*` (each ≤ 2 MB is enforced instead).
-- [ ] **Step 3: Write `ci.yml`.** On `pull_request` and push to main, run on `macos-latest`: checkout → `astral-sh/setup-uv` → `uv sync --group convert` → `uv run pytest -q` → `uv run python scripts/check_gates_adr.py` → `uv run python scripts/check_large_files.py` → `uv run python -c "from egcm.fixtures import verify_manifest as v; assert v()==[]"` → `cd swift && swift build && swift test`.
+- [ ] **Step 3: Write `ci.yml`.** On `pull_request` and push to main, run on `macos-latest`: checkout → `astral-sh/setup-uv` → `uv sync --group convert` → `uv run pytest -q` → `uv run python -m scripts.check_gates_adr` → `uv run python -m scripts.check_large_files` → `uv run --group dev ruff check .` → `uv run python -c "from egcm.fixtures import verify_manifest as v; assert v()==[]"` → `cd swift && swift build && swift test`.
 - [ ] **Step 4: Run it.** `uv run --group convert pytest -q && just status`. Expected: PASS, and STATUS.md shows every stage.
 - [ ] **Step 5: Commit.** `git commit -am "chore: status/results generation, gates-ADR CI check"`
 
@@ -1288,7 +1362,7 @@ def test_gates_change_needs_adr():
 **Files:** create `stages/s7_publish/run.py`, README.
 
 - [ ] **Step 1: Implement.**
-  1. Refuse unless `--confirm` is given **and** s0–s6 reports pass at HEAD (or are not stale per gen_status).
+  1. Refuse unless `--confirm` is given **and** s0–s6 reports have `status == "passed"` and are not stale per `egcm.provenance.is_stale`. Write its own report with `run_stage("s7_publish", fill)` with `metrics.confirmed = True` only when `--confirm` was given and the upstream check passed.
   2. Read `HF_REPO_TARGET` from the environment and exit with a message if it's unset.
   3. Create the HF model repo (public) via `huggingface_hub.create_repo(exist_ok=True)`.
   4. Upload the uncompressed `EmbeddingGemma2.mlpackage/` directory plus `files.json`, the tokenizer files, a README model card (base model, license Apache-2.0, parity table from RESULTS.md, usage via the Swift package) and `NOTICE`.

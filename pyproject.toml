@@ -1,0 +1,34 @@
+[project]
+name = "egcm"
+version = "0.1.0"
+description = "EmbeddingGemma 2 to Core ML conversion pipeline"
+requires-python = ">=3.12,<3.13"
+dependencies = ["numpy>=2", "pydantic>=2.7", "safetensors>=0.4", "pillow>=11", "tomli-w>=1"]
+
+[dependency-groups]
+# torch is pinned to the newest version coremltools 9.0 officially supports.
+# Source: coremltools 9.0 (PyPI, 2025-11-10) sets _TORCH_MAX_VERSION = "2.7.0" in
+# coremltools/_deps/__init__.py, and the 9.0 release notes say "Support for PyTorch 2.7".
+# https://github.com/apple/coremltools/releases/tag/9.0
+# Re-check when a newer coremltools is released.
+convert = ["torch==2.7.0", "coremltools==9.0", "pytest>=8"]
+# Used only by stage s0. A release, so the environment is reproducible: 5.20.2 contains EmbeddingGemma2
+# (it first shipped in 5.19.0) and vendor/reference/ is copied from the v5.20.2 tag.
+reference = ["torch", "transformers==5.20.2", "sentence-transformers>=6.1", "torchvision", "pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.uv]
+package = false
+# convert needs the torch that coremltools supports; reference needs a transformers release.
+conflicts = [[{ group = "convert" }, { group = "reference" }]]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "RUF"]

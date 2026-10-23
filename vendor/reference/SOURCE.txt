@@ -1,0 +1,13 @@
+Read-only copies of upstream reference code. Never imported by egcm.
+Repo:    https://github.com/huggingface/transformers
+Release: v5.20.2 (the version the `reference` dependency group installs)
+Commit:  18329f1065382e54db698e242cf98bd3f3e5a766
+License: Apache-2.0
+
+src/transformers/models/embedding_gemma2/modeling_embedding_gemma2.py
+src/transformers/models/gemma4/modeling_gemma4.py
+src/transformers/models/gemma4/image_processing_gemma4.py
+
+History: first copied from main at 6b6792ff3b1a434913dc59659d4461acc9c3a51a (5.21.0.dev0) on 2026-10-22,
+then re-vendored from v5.20.2 the same day. The only differences were in modeling_gemma4.py, in the
+language-model head (logits_to_keep slicing) and a type annotation; no vision or embedding code changed.

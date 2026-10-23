@@ -1,0 +1,53 @@
+# Every threshold lives here. Changing this file needs a new docs/decisions/ADR-*.md in the same commit.
+#
+# Each table is keyed by the full stage name. The comparison direction comes from the key:
+#   min_*  -> metric >= value
+#   max_*  -> metric <= value
+#   bool   -> metric == value
+# Any other key raises when the file is loaded. The prefix is the direction only; each metric's
+# docstring (egcm/metrics.py) or stage README defines how it is aggregated.
+# A "targets" subtable holds recorded-only numbers; it is never gated.
+
+[s0_reference]
+license_apache = true
+key_inventory_written = true
+deterministic = true
+
+[s1_rewrite]
+strict_load = true
+min_cosine_text = 0.9999
+min_cosine_image = 0.9999
+
+[s2_coreml_fp32]
+min_cosine_text = 0.9999
+min_cosine_image = 0.9999
+
+[s3_coreml_ane]
+min_cosine_text = 0.995
+min_cosine_image = 0.995
+min_ane_fraction = 0.95
+
+[s4_compress]
+# min_cosine is the minimum over text and image vectors combined.
+min_cosine = 0.99
+min_recall_at_10 = 0.95
+# 5th percentile over the 120 app queries (see egcm.metrics.spearman_topk).
+min_p5_spearman_top50 = 0.9
+max_download_mb = 300
+
+[s5_swift]
+token_ids_identical = true
+# 1/255 rounded up.
+max_pixel_abs_diff = 0.003922
+# Minimum over text and image vectors combined.
+min_cosine = 0.99
+
+[s6_device]
+max_peak_rss_mb = 800
+min_devices = 1
+
+[s6_device.targets]
+target_ms_per_image_70 = 60
+
+[s7_publish]
+confirmed = true
