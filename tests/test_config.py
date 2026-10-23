@@ -95,3 +95,48 @@ def test_sliding_window_shorter_than_max_seq_rejected(tmp_path):
 def test_load_real_config():
     text, vis, _ = config.load(HF_SNAPSHOT)
     check_known_values(text, vis)
+
+
+def test_configs_are_hashable_and_read_only(tmp_path):
+    text, vis, _ = config.load(write(tmp_path, fake_config()))
+    text2, vis2, _ = config.load(write(tmp_path, fake_config()))
+    assert hash(text) == hash(text2) and text == text2
+    assert hash(vis) == hash(vis2) and vis == vis2
+    assert {text, text2} == {text}
+    with pytest.raises(TypeError):
+        text.head_dim["full_attention"] = 1
+
+
+@pytest.mark.parametrize("key", ["24", "5", "foo"])
+def test_unknown_per_layer_config_key_rejected(tmp_path, key):
+    c = fake_config()
+    c["text_config"]["per_layer_config"][key] = {"head_dim": 512}
+    with pytest.raises(ValueError, match="not layer indices"):
+        config.load(write(tmp_path, c))
+
+
+@pytest.mark.parametrize("layer_types", [["sliding_attention"] * 23, ["sliding_attention"] * 23 + ["chunked"]])
+def test_bad_layer_types_rejected(tmp_path, layer_types):
+    with pytest.raises(ValueError, match="layer_types"):
+        config.load(write(tmp_path, fake_config(layer_types=layer_types)))
+
+
+def test_text_rope_type_rejected(tmp_path):
+    c = fake_config()
+    c["text_config"]["rope_parameters"]["full_attention"]["rope_type"] = "yarn"
+    with pytest.raises(ValueError, match="rope_type"):
+        config.load(write(tmp_path, c))
+
+
+def test_vision_rope_type_rejected(tmp_path):
+    c = fake_config()
+    c["vision_config"]["rope_parameters"]["rope_type"] = "default"
+    with pytest.raises(ValueError, match="rope_type"):
+        config.load(write(tmp_path, c))
+
+
+def test_clipped_linears_rejected(tmp_path):
+    c = fake_config()
+    c["vision_config"]["use_clipped_linears"] = True
+    with pytest.raises(ValueError, match="use_clipped_linears"):
+        config.load(write(tmp_path, c))

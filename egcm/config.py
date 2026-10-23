@@ -6,12 +6,36 @@ raises ValueError if the file breaks one of them.
 """
 
 import json
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from egcm.buckets import MAX_SEQ
 
 LAYER_TYPES = ("sliding_attention", "full_attention")
+
+
+class FrozenMap(Mapping):
+    """A read-only, hashable mapping, so the frozen config dataclasses keep value equality and can be hashed
+    (a dict field would make `hash(cfg)` raise). Compares equal to a dict with the same items."""
+
+    def __init__(self, items: Mapping):
+        self._d = dict(items)
+
+    def __getitem__(self, key):
+        return self._d[key]
+
+    def __iter__(self) -> Iterator:
+        return iter(self._d)
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __hash__(self) -> int:
+        return hash(frozenset(self._d.items()))
+
+    def __repr__(self) -> str:
+        return f"FrozenMap({self._d!r})"
 
 
 @dataclass(frozen=True)
@@ -25,9 +49,9 @@ class TextCfg:
     vocab: int
     eps: float
     layer_types: tuple[str, ...]
-    head_dim: dict[str, int]  # keyed by layer type
-    kv_heads: dict[str, int]  # keyed by layer type
-    theta: dict[str, float]  # keyed by layer type
+    head_dim: FrozenMap  # layer type -> int
+    kv_heads: FrozenMap  # layer type -> int
+    theta: FrozenMap  # layer type -> float
     pad_id: int
     sliding_window: int
 
@@ -47,7 +71,7 @@ class VisionCfg:
     pos_size: int
 
 
-def _per_type(t: dict, field: str, default_key: str) -> dict[str, int]:
+def _per_type(t: dict, field: str, default_key: str) -> FrozenMap:
     """Resolve a per-layer field to one value per layer type.
 
     `per_layer_config` holds overrides keyed by 2-digit layer index ("05"); layers without an entry use the
@@ -65,7 +89,7 @@ def _per_type(t: dict, field: str, default_key: str) -> dict[str, int]:
             seen[kind] = (value, key)
         elif seen[kind][0] != value:
             raise ValueError(f"layer {key} ({kind}) has {field}={value}, layer {seen[kind][1]} has {seen[kind][0]}")
-    return {kind: value for kind, (value, _) in seen.items()}
+    return FrozenMap({kind: value for kind, (value, _) in seen.items()})
 
 
 def _no_attention_bias(c: dict, tower: str) -> None:
@@ -92,7 +116,7 @@ def _text(t: dict) -> TextCfg:
         vocab=t["vocab_size"], eps=t["rms_norm_eps"], layer_types=layer_types,
         head_dim=_per_type(t, "head_dim", "head_dim"),
         kv_heads=_per_type(t, "num_key_value_heads", "num_key_value_heads"),
-        theta={kind: float(rope[kind]["rope_theta"]) for kind in set(layer_types)},
+        theta=FrozenMap({kind: float(rope[kind]["rope_theta"]) for kind in set(layer_types)}),
         pad_id=t["pad_token_id"], sliding_window=t["sliding_window"],
     )
 
