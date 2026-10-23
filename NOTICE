@@ -20,3 +20,10 @@ This product includes software developed by third parties:
   Delavalom, 2026: the minimal functions were extracted into one test-only
   module, with config lookups replaced by arguments; the maths is unchanged.
   It is used only as a test oracle and is not shipped.
+
+- tests/upstream_towers.py is a modified copy of the tower modules from the same
+  release (modeling_embedding_gemma2.py, modeling_gemma4.py,
+  image_processing_gemma4.py), Copyright The Hugging Face Team, licensed under
+  the Apache License, Version 2.0. Modified by Delavalom, 2026: config objects
+  replaced by arguments, masks built inline, no output records or kernels; the
+  maths is unchanged. It is used only as a test oracle and is not shipped.

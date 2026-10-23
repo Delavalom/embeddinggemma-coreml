@@ -1,6 +1,7 @@
 """The rewrite's building blocks convert with coremltools (FP16, iOS18, jit.trace) and run on the Neural Engine.
 
-Each case is RMSNormCF -> AttentionCF (with key_mask) as one traced graph, for both RoPE variants.
+Each case is RMSNormCF -> AttentionCF (with key_mask) as one traced graph, for both RoPE variants. The tiny
+TextEmbedder and ImageEmbedder (tests/tiny.py) are also converted whole, at FP32, and compared with torch.
 
 - Conversion and accuracy use tiny dims (fast).
 - The placement check uses the real head layout (text sliding layer: hidden 512, 4 heads, 2 kv heads, head_dim 256;
@@ -106,3 +107,56 @@ def test_every_op_on_neural_engine(case):
         if device != "MLNeuralEngineComputeDevice":
             off_ane.append((op.operator_name, device))
     assert not off_ane, off_ane
+
+
+@pytest.fixture(scope="module")
+def tiny_embedders():
+    import tiny
+
+    with torch.no_grad():
+        text, image, _ = tiny.rewrite(tiny.hf_state_dict(*tiny.reference()), text_len=16)
+    return text, image
+
+
+def convert_embedder(m, example, inputs):
+    """FP32 on the CPU: this checks the traced graph converts and keeps its meaning (FP16 accuracy is s3's job)."""
+    with torch.no_grad():
+        traced = torch.jit.trace(m, example)
+    return ct.convert(
+        traced, inputs=inputs, outputs=[ct.TensorType("embedding", dtype=np.float32)], convert_to="mlprogram",
+        minimum_deployment_target=ct.target.iOS18, compute_precision=ct.precision.FLOAT32,
+        compute_units=ct.ComputeUnit.CPU_ONLY,
+    )
+
+
+def assert_embedding_close(ml, feed, want):
+    got = ml.predict(feed)["embedding"]
+    assert got.shape == want.shape
+    assert np.isfinite(got).all()
+    assert float((got * want).sum()) >= 1 - 1e-5  # both are unit vectors
+
+
+def test_tiny_text_embedder_converts(tiny_embedders):
+    m = tiny_embedders[0]
+    S, n = m.seq_len, 11
+    ids = torch.zeros(1, S, dtype=torch.int32)
+    ids[0, :n] = torch.randint(1, 40, (n,), generator=torch.Generator().manual_seed(0), dtype=torch.int32)
+    mask = (torch.arange(S) < n).float()[None]
+    ml = convert_embedder(m, (ids, mask), [ct.TensorType("input_ids", shape=(1, S), dtype=np.int32),
+                                           ct.TensorType("attention_mask", shape=(1, S), dtype=np.float32)])
+    assert not [op for op in mil_ops(ml) if op.op_type in ("neg", "negative")]
+    if platform.system() == "Darwin":
+        with torch.no_grad():
+            want = m(ids, mask).numpy()
+        assert_embedding_close(ml, {"input_ids": ids.numpy(), "attention_mask": mask.numpy()}, want)
+
+
+def test_tiny_image_embedder_converts(tiny_embedders):
+    m = tiny_embedders[1]
+    b = m.vision.bucket
+    pixels = torch.rand(1, 3, b.height, b.width, generator=torch.Generator().manual_seed(0))
+    ml = convert_embedder(m, (pixels,), [ct.TensorType("pixels", shape=pixels.shape, dtype=np.float32)])
+    if platform.system() == "Darwin":
+        with torch.no_grad():
+            want = m(pixels).numpy()
+        assert_embedding_close(ml, {"pixels": pixels.numpy()}, want)
