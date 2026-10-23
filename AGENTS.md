@@ -112,7 +112,8 @@ egcm/                     shared Python library
   buckets.py              bucket table, selection, resize-size math
   config.py               typed model config from HF config.json; checks the assumptions the rewrite relies on
   model/                  norm.py (RMSNormCF) rope.py (1-D / axial 2-D tables) attention.py (AttentionCF)
-                          masks.py (key_mask); text.py vision.py embedder.py (planned: Tasks 10–11)
+                          masks.py (key_mask); text.py (TextTower) vision.py (VisionEncoder, VisionTower per
+                          bucket) embedder.py (TextEmbedder, ImageEmbedder: the Core ML entry points)
   weights.py              safetensors -> rewrite mapping, strict (planned: Task 12)
   convert.py              torch -> mlpackage + multifunction merge (planned: Task 13)
   compress.py             int8 / palettize (planned: Task 15)
