@@ -11,11 +11,11 @@ import torch
 from egcm.buckets import BUCKETS, BUDGETS, Bucket
 from egcm.config import TextCfg
 from egcm.fixtures import load_bucket_pixels
+from egcm.functions import image_embedder
 from egcm.metrics import cosine_rows
-from egcm.model.embedder import TEXT_LENGTHS, ImageEmbedder, TextEmbedder
+from egcm.model.embedder import TEXT_LENGTHS, TextEmbedder
 from egcm.model.text import TextTower
 from egcm.model.vision import VisionEncoder
-from egcm.weights import build_vision_tower
 from stages.s0_reference.pixels import patch_positions
 
 WORST = 3  # lowest-cosine fixtures listed per group in the report
@@ -57,29 +57,6 @@ def run_texts(tower: TextTower, table: torch.Tensor, cfg: TextCfg, s0: Path) -> 
     by_length = {str(L): _summary([k for k, x in zip(order, length, strict=True) if x == L],
                                   cos[np.array(length) == L]) for L in sorted(set(length))}
     return {"min": float(cos.min()), "all": _summary(order, cos), "by_length": by_length}
-
-
-def image_affixes(layout: dict, bucket: Bucket) -> tuple[list[int], list[int]]:
-    """The token ids before and after the image placeholders in s0's recorded sequence for this bucket."""
-    entry = layout["buckets"][bucket.function_name]
-    ids, image = entry["input_ids"], layout["special_token_ids"]["image"]
-    where = [i for i, t in enumerate(ids) if t == image]
-    if len(where) != bucket.tokens or where != list(range(where[0], where[0] + len(where))):
-        raise AssertionError(f"{bucket.function_name}: {len(where)} image placeholders, expected {bucket.tokens} "
-                             f"in one run")
-    return ids[: where[0]], ids[where[-1] + 1:]
-
-
-def embed_ids(table: torch.Tensor, ids: list[int]) -> torch.Tensor:
-    """Scaled text embeddings of fixed tokens, (1, C, 1, n)."""
-    return table[torch.tensor(ids, dtype=torch.long)].T[None, :, None, :].contiguous()
-
-
-def image_embedder(encoder: VisionEncoder, tower: TextTower, table: torch.Tensor, layout: dict,
-                   bucket: Bucket) -> ImageEmbedder:
-    prefix, suffix = image_affixes(layout, bucket)
-    return ImageEmbedder(build_vision_tower(encoder, bucket), tower, embed_ids(table, prefix),
-                         embed_ids(table, suffix)).eval()
 
 
 def _check_inputs(z, image_id: str, layout: dict, bucket: Bucket) -> None:

@@ -115,7 +115,9 @@ egcm/                     shared Python library
                           masks.py (key_mask); text.py (TextTower) vision.py (VisionEncoder, VisionTower per
                           bucket) embedder.py (TextEmbedder, ImageEmbedder: the Core ML entry points)
   weights.py              safetensors -> rewrite mapping, strict load, q.k logit bound check
-  convert.py              torch -> mlpackage + multifunction merge (planned: Task 13)
+  functions.py            the spec §7 entry points: names, I/O contract (int32 mask), torch module per function
+  convert.py              torch -> mlpackage, batched multifunction merge (weights stored once), contract check
+  evaluate.py             runs every s0 fixture through a compiled package (s2-s4), latency
   compress.py             int8 / palettize (planned: Task 15)
   probe.py                activation max-abs probe (planned: Task 14)
   fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)
