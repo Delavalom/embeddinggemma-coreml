@@ -1,7 +1,11 @@
 # group: reference
 """Build fixtures/: 200 images, images.jsonl and MANIFEST.sha256. texts.jsonl is hand-written and only read here.
 
-    uv run --exact --group reference python -m stages.s0_reference.build_fixtures [--requery]
+    uv run --exact --group reference python -m stages.s0_reference.build_fixtures [--requery] [--accept-changes]
+
+It builds into artifacts/fixtures_build/ and swaps the result into fixtures/ only at the end. If the new
+MANIFEST.sha256 differs from the committed one it lists the changed files and refuses, unless --accept-changes.
+Hand-written files (texts.jsonl, README.md) are copied, never generated.
 
 Images (ids i000-i199):
   100 CC0 / public-domain Commons photos (8 categories, see commons.CATEGORIES), longer side <= 1600 px, JPEG quality 85
@@ -11,18 +15,19 @@ Images (ids i000-i199):
    10 near-duplicates (5% crop of a Commons photo, JPEG quality 60)
    10 receipts at 1000x2400
 JPEG quality 92 unless stated. Seeded: the same Commons files (pinned in commons_sources.json) and the same
-fonts give the same bytes.
+fonts give the same bytes. Photos are converted to sRGB and stored without ICC profiles or EXIF.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import random
 import shutil
 from pathlib import Path
 
-from egcm.fixtures import load_texts, write_manifest
+from egcm.fixtures import MANIFEST, load_texts, write_manifest
 from egcm.paths import ARTIFACTS, FIXTURES
 from stages.s0_reference import commons, synth
 
@@ -32,6 +37,8 @@ MAX_SIDE = 1600  # Commons photos
 PHOTO_QUALITY = 85
 DERIVED_MAX_SIDE = 1200  # memes, blurry and dark images, to keep fixtures/ under MAX_TOTAL_MB
 MAX_TOTAL_MB = 60
+HAND_WRITTEN = ("texts.jsonl", "README.md")
+SOURCES = "commons_sources.json"
 SYNTHETIC = {"license": "CC0", "author": "egcm build_fixtures (synthetic)", "source_url": None}
 
 MEME_CAPTIONS = [
@@ -68,13 +75,54 @@ def _save(im, images_dir: Path, image_id: str, category: str, fmt: str = "JPEG",
     return f"images/{name}"
 
 
-def build(root: Path = FIXTURES, requery: bool = False) -> list[dict]:
+def build(root: Path = FIXTURES, requery: bool = False, accept_changes: bool = False,
+          staging: Path = ARTIFACTS / "fixtures_build") -> list[str]:
+    """Rebuild fixtures/ and return the paths whose content changed (relative to fixtures/)."""
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    for name in HAND_WRITTEN:
+        if (root / name).is_file():
+            shutil.copy2(root / name, staging / name)
+    sources = copy.deepcopy(commons.pick_sources(root / SOURCES, requery=requery))
+    commons.fill_revisions(sources)
+    rows = render(staging, sources)
+    (staging / SOURCES).write_text(json.dumps(sources, indent=1, ensure_ascii=False) + "\n")
+    write_manifest(staging)
+    _check(staging, rows)
+    changed = manifest_changes(root / MANIFEST, staging / MANIFEST)
+    if changed and (root / MANIFEST).is_file() and not accept_changes:
+        shutil.rmtree(staging)
+        raise SystemExit(f"{len(changed)} fixture files would change ({', '.join(changed[:10])}"
+                         f"{', ...' if len(changed) > 10 else ''}). Rerun with --accept-changes to replace them.")
+    if root.exists():
+        old = root.with_name(root.name + ".old")
+        if old.exists():
+            shutil.rmtree(old)
+        root.rename(old)
+        shutil.move(str(staging), str(root))
+        shutil.rmtree(old)
+    else:
+        shutil.move(str(staging), str(root))
+    print(f"{len(changed)} files changed" + (f": {', '.join(changed)}" if changed else ""))
+    return changed
+
+
+def manifest_changes(old: Path, new: Path) -> list[str]:
+    """Paths added, removed or with a different hash between two manifests."""
+    def entries(p: Path) -> set[tuple[str, str]]:
+        if not p.is_file():
+            return set()
+        return {tuple(line.split("  ", 1)[::-1]) for line in p.read_text().splitlines() if line.strip()}
+
+    return sorted({path for path, _ in entries(old) ^ entries(new)})
+
+
+def render(root: Path, sources: list[dict]) -> list[dict]:
+    """Write images/ and images.jsonl under root. Fills in each source's sha256."""
     images_dir = root / "images"
-    if images_dir.exists():
-        shutil.rmtree(images_dir)
     images_dir.mkdir(parents=True)
     docs = [t["text"] for t in load_texts(root) if t["kind"] == "document"]
-    sources = commons.pick_sources(root / "commons_sources.json", requery=requery)
     cache = ARTIFACTS / "fixture_cache"
     rows: list[dict] = []
     photos: list[tuple[dict, object]] = []  # (row, image) of the Commons photos, reused by the edits
@@ -133,8 +181,6 @@ def build(root: Path = FIXTURES, requery: bool = False) -> list[dict]:
     with open(root / "images.jsonl", "w") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    write_manifest(root)
-    _check(root, rows)
     return rows
 
 
@@ -157,7 +203,9 @@ def _check(root: Path, rows: list[dict]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--requery", action="store_true", help="search Commons again instead of commons_sources.json")
-    build(requery=ap.parse_args().requery)
+    ap.add_argument("--accept-changes", action="store_true", help="replace fixtures even if the manifest changes")
+    args = ap.parse_args()
+    build(requery=args.requery, accept_changes=args.accept_changes)
 
 
 if __name__ == "__main__":

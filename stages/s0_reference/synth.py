@@ -1,11 +1,12 @@
 """Locally rendered fixture images (screenshots, memes, receipts) and the photo edits (blur, dark, near-duplicate).
 
 Every function takes a seeded `random.Random`, so the same seed gives the same pixels on the same fonts.
-Fonts are macOS system fonts; if one cannot be loaded, PIL's built-in font is used. `font_name` records which.
+Fonts are macOS system fonts; a missing font is an error. `font_name` records which file was used.
 """
 
 from __future__ import annotations
 
+import functools
 import random
 import textwrap
 from pathlib import Path
@@ -21,26 +22,26 @@ SCREEN = (1170, 2532)  # iPhone portrait, width x height
 RECEIPT = (1000, 2400)
 
 
-def font(kind: str, size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
-    for f in FONT_FILES[kind]:
-        if Path(f).is_file():
-            try:
-                return ImageFont.truetype(f, size)
-            except OSError:
-                continue
-    return ImageFont.load_default(size)
-
-
-def font_name(kind: str) -> str:
-    """The font file `font(kind, ...)` uses, or "PIL default"."""
+@functools.cache
+def _font_file(kind: str) -> str:
+    """The first loadable font file for `kind`. A missing font is an error: the pixels would silently change."""
     for f in FONT_FILES[kind]:
         if Path(f).is_file():
             try:
                 ImageFont.truetype(f, 12)
-                return Path(f).name
+                return f
             except OSError:
                 continue
-    return "PIL default"
+    raise FileNotFoundError(f"no {kind!r} font found; tried {FONT_FILES[kind]}")
+
+
+def font(kind: str, size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(_font_file(kind), size)
+
+
+def font_name(kind: str) -> str:
+    """The font file `font(kind, ...)` uses."""
+    return Path(_font_file(kind)).name
 
 
 def _status_bar(d: ImageDraw.ImageDraw, rng: random.Random, dark: bool) -> None:
