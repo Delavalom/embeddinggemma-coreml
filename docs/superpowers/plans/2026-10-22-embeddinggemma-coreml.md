@@ -9,7 +9,7 @@
 - A plain-PyTorch, Neural-Engine-shaped rewrite of the text and vision towers, loaded from Google's safetensors and converted with coremltools into one multifunction `.mlpackage`.
 - A SwiftPM package that runs it.
 
-**Tech stack:** Python 3.12 + uv, torch, coremltools, safetensors, numpy, pydantic, pytest; `transformers@main` + `sentence-transformers>=6.1` (reference only). Swift 6, SwiftPM, swift-transformers (Tokenizers), Accelerate, Core ML. `just`, GitHub Actions (macOS).
+**Tech stack:** Python 3.12 + uv, torch, coremltools, safetensors, numpy, pydantic, pytest; `transformers==5.20.2` + `sentence-transformers>=6.1` (reference only). Swift 6, SwiftPM, swift-transformers (Tokenizers), Accelerate, Core ML. `just`, GitHub Actions (macOS).
 
 **Spec:** `docs/superpowers/specs/2026-10-22-embeddinggemma-coreml-design.md`. Read it first.
 
@@ -152,7 +152,7 @@ dependencies = ["numpy>=2", "pydantic>=2.7", "safetensors>=0.4", "pillow>=11", "
 
 [dependency-groups]
 convert = ["torch", "coremltools>=9", "pytest>=8"]
-reference = ["torch", "transformers @ git+https://github.com/huggingface/transformers@main", "sentence-transformers>=6.1", "torchvision", "pytest>=8"]
+reference = ["torch", "transformers==5.20.2", "sentence-transformers>=6.1", "torchvision", "pytest>=8"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [tool.uv]
@@ -312,7 +312,7 @@ publish *flags:
 ```
 
 - [ ] **Step 8: Write `AGENTS.md`** with the 7 rules from spec §4 verbatim, the command list, the stage table (spec §5), and a "Where things are" map (the file map above). Write `CLAUDE.md` containing only `See AGENTS.md.`
-- [ ] **Step 9: Copy the reference sources.** Download the three upstream files into `vendor/reference/`, pinned to a commit: get the SHA from `gh api repos/huggingface/transformers/commits/main --jq .sha` and save it in `vendor/reference/SOURCE.txt`. Add `LICENSE` (Apache-2.0 full text) and a `NOTICE` that credits Google (model) and Hugging Face (reference code).
+- [ ] **Step 9: Copy the reference sources.** Download the three upstream files into `vendor/reference/`, from the `v5.20.2` tag (the version the `reference` group installs); record the tag and its commit SHA (`gh api repos/huggingface/transformers/commits/v5.20.2 --jq .sha`) in `vendor/reference/SOURCE.txt`. Add `LICENSE` (Apache-2.0 full text) and a `NOTICE` that credits Google (model) and Hugging Face (reference code).
 - [ ] **Step 10: Commit.** `git add -A && git commit -m "chore: scaffold repo, gates, agent docs"`
 
 ### Task 2: Report schema and gate loading
@@ -596,7 +596,7 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
   8. **Determinism:** run steps 4–5 twice on the first 10 items and assert bitwise equality → `metrics.deterministic = True`.
   9. Wrap steps 1–8 in `fill(report)` and call `run_stage("s0_reference", fill)` (`egcm.stage`). `fill` sets `metrics` `deterministic`, `license_apache` (True when the model card license is `apache-2.0`) and `key_inventory_written`, and `details = {"revision", "license": "apache-2.0", "embedding_path"}`. Provenance, `inputs_sha256` (manifest + revision), evaluation against `[s0_reference]` and the exit code are `run_stage`'s job.
 - [ ] **Step 2: Run it.** `just stage 0`. Expected: report passes. `image_token_layout.json` shows the sequence. `keys.json` has `vision_tower.*`, `embed_vision.*` and `language_model.*` keys.
-- [ ] **Step 3: Write `stages/s0_reference/README.md`.** Input, outputs (the list above), gate, and known failure modes: "transformers main moved: pin the commit from `vendor/reference/SOURCE.txt` in pyproject"; "sentence-transformers `encode` dict input changed: use the manual pooling path".
+- [ ] **Step 3: Write `stages/s0_reference/README.md`.** Input, outputs (the list above), gate, and known failure modes: "transformers changed: the version is pinned in pyproject (`transformers==5.20.2`); if you bump it, re-vendor `vendor/reference/` from the same tag and diff the model code"; "sentence-transformers `encode` dict input changed: use the manual pooling path".
 - [ ] **Step 4: Update the plan facts.** If `image_token_layout.json` or `keys.json` contradict the facts at the top of this plan, update the "Facts" section in this file, in the same commit, before Task 7.
 - [ ] **Step 5: Commit.** `git commit -am "feat(s0): reference vectors and debug intermediates"` (artifacts stay gitignored).
 
