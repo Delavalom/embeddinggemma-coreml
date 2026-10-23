@@ -1,5 +1,6 @@
 /// Which prompt prefix EmbeddingGemma prepends to a text input.
-public enum Task: Sendable {
+/// Named `EmbeddingTask` (not `Task`) so it never shadows `Swift.Task` for importers.
+public enum EmbeddingTask: Sendable {
   case query, document, classification, clustering
 
   /// The exact prefix the model was trained with.

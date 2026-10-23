@@ -176,7 +176,7 @@ public actor EmbeddingGemma {
   public static func load(_ source: Source, budget: ImageBudget = .auto, dimensions: Int = 256) async throws -> EmbeddingGemma
   public func embed(image: CGImage) async throws -> [Float]                     // normalized, `dimensions` long
   public func embed(query: String) async throws -> [Float]                      // adds the search-query prefix
-  public func embed(text: String, task: Task = .document) async throws -> [Float]
+  public func embed(text: String, task: EmbeddingTask = .document) async throws -> [Float]
   public nonisolated var modelRevision: String { get }
 }
 public struct VectorIndex: Sendable {   // EmbeddingIndex module

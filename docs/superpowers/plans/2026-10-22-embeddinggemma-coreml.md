@@ -117,7 +117,7 @@ embeddinggemma-coreml/
   fixtures/images/*.{jpg,png}  fixtures/images.jsonl  fixtures/texts.jsonl  fixtures/MANIFEST.sha256
   docs/decisions/ADR-0001-ane-rewrite.md  docs/decisions/ADR-0002-image-buckets.md  docs/RESULTS.md
   swift/Package.swift
-  swift/Sources/EmbeddingGemma/{EmbeddingGemma.swift,Task.swift,Errors.swift,DeviceTier.swift,
+  swift/Sources/EmbeddingGemma/{EmbeddingGemma.swift,EmbeddingTask.swift,Errors.swift,DeviceTier.swift,
        Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,ModelStore.swift,Checksums.swift}
   swift/Sources/EmbeddingIndex/{VectorIndex.swift,IndexFile.swift}
   swift/Sources/egcm-parity/main.swift  # s5 CLI
@@ -1111,7 +1111,7 @@ def palettize4(m):
 
 ### Task 16: Swift package, part 1 (tokenizer, buckets, preprocessing)
 
-**Files:** create `swift/Package.swift`, `Sources/EmbeddingGemma/{Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,Task.swift,Errors.swift}`, and tests.
+**Files:** create `swift/Package.swift`, `Sources/EmbeddingGemma/{Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,EmbeddingTask.swift,Errors.swift}`, and tests.
 
 - [ ] **Step 1: Write `Package.swift`.**
 
@@ -1160,7 +1160,7 @@ let package = Package(
 - [ ] **Step 3: `EmbeddingGemma.swift`.** The actor from spec §8:
   - `load` → ModelStore → for each needed function, `MLModel(contentsOf:configuration:)` with `MLModelConfiguration.functionName = fn` and `computeUnits = .cpuAndNeuralEngine`. Image functions are loaded lazily per bucket at the chosen budget; text functions lazily per length.
   - `embed(image:)` → preprocess → predict → take the `embedding` (768) → truncate to `dimensions` → L2 normalize → `[Float]`.
-  - `embed(query:)` uses the prompt `task: search result | query: `; `embed(text:task:)` maps `Task.document → "title: none | text: "`, `.classification → "task: classification | query: "`, `.clustering → "task: clustering | query: "`.
+  - `embed(query:)` uses the prompt `task: search result | query: `; `embed(text:task:)` maps `EmbeddingTask.document → "title: none | text: "`, `.classification → "task: classification | query: "`, `.clustering → "task: clustering | query: "`.
   - `modelRevision` is the HF commit SHA.
 - [ ] **Step 4: Run it.** `swift test`. Expected: PASS (end-to-end tests skip cleanly if `artifacts/s4_compress` is missing, with message "run just stage 4").
 - [ ] **Step 5: Commit.** `git commit -am "feat(swift): model runtime + verified downloader"`
