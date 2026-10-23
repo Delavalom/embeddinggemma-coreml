@@ -7,42 +7,62 @@ image_token_layout.json. See stages/s0_reference/README.md.
 
 from __future__ import annotations
 
-import json
+import contextlib
 import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 from huggingface_hub import snapshot_download
 from safetensors import safe_open
 
-from egcm.buckets import BUCKETS, BUDGETS, POOL, aspect_preserving_size, choose_bucket
-from egcm.fixtures import load_images, load_texts, open_image
-from egcm.paths import ARTIFACTS, HF_REPO, HF_REVISION, stage_dir
+from egcm.buckets import BUCKETS, BUDGETS, POOL, choose_bucket
+from egcm.fixtures import load_images, load_texts, open_image, sha256_file, verify_manifest
+from egcm.paths import ARTIFACTS, HF_MODEL_SHA256, HF_REPO, HF_REVISION, stage_dir
 from egcm.report import Report
 from egcm.stage import run_stage
+from stages.s0_reference import artifacts, pixels
 from stages.s0_reference import reference as ref
 
 STAGE = "s0_reference"
 EMBEDDING_PATH = 'sentence_transformers.SentenceTransformer.encode({"image": img}, processing_kwargs=' \
                  '{"image": {"max_soft_tokens": budget}}); texts: encode(text, prompt_name="query"|"document")'
-N_DETERMINISM = 10
 MIN_PATH_COSINE = 0.99999
 MAX_TEXT_TOKENS = 128  # the longest text function is embed_text_128; every fixture text must fit
+
+
+@dataclass
+class BudgetResult:
+    """Everything s0 keeps in memory for one budget (pixel arrays go straight to disk)."""
+
+    budget: int
+    order: list[str] = field(default_factory=list)
+    bucket: list[str] = field(default_factory=list)
+    emb_raw: list[np.ndarray] = field(default_factory=list)
+    emb_bucket: list[np.ndarray] = field(default_factory=list)
+    raw_soft_tokens: list[int] = field(default_factory=list)
+    ids: dict[str, np.ndarray] = field(default_factory=dict)
+    sample: dict[str, dict] = field(default_factory=dict)  # first-pass results of the determinism sample
+
+    def raw_vs_bucket(self) -> dict[str, float]:
+        cos = np.einsum("nd,nd->n", np.stack(self.emb_raw), np.stack(self.emb_bucket))
+        return {"min": float(cos.min()), "median": float(np.median(cos))}
 
 
 def download() -> Path:
     snap = Path(snapshot_download(HF_REPO, revision=HF_REVISION, cache_dir=str(ARTIFACTS / "hf")))
     if snap.name != HF_REVISION:
         raise RuntimeError(f"snapshot {snap} is not revision {HF_REVISION}")
+    digest = sha256_file(snap / "model.safetensors")
+    if digest != HF_MODEL_SHA256:
+        raise RuntimeError(f"model.safetensors has sha256 {digest}, expected {HF_MODEL_SHA256}")
     return snap
 
 
-def write_keys(snap: Path, out: Path) -> dict:
+def tensor_inventory(snap: Path) -> dict[str, tuple[list[int], str]]:
     with safe_open(snap / "model.safetensors", framework="pt") as f:
-        keys = {k: [list(f.get_slice(k).get_shape()), f.get_slice(k).get_dtype()] for k in sorted(f.keys())}
-    (out / "keys.json").write_text(json.dumps(keys, indent=1) + "\n")
-    return keys
+        return {k: (list(f.get_slice(k).get_shape()), f.get_slice(k).get_dtype()) for k in f.keys()}
 
 
 def card_license(snap: Path) -> str:
@@ -53,143 +73,159 @@ def card_license(snap: Path) -> str:
 def run_texts(m, texts: list[dict]) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     embs, ids = [], {}
     for t in texts:
-        prompt = "query" if t["kind"] == "query" else "document"
-        ids[t["id"]] = ref.text_features(m, t["text"], prompt)["input_ids"][0].numpy().astype(np.int32)
-        embs.append(ref.encode_text(m, t["text"], prompt))
+        name = ref.prompt_name(t["kind"])
+        ids[t["id"]] = ref.text_features(m, t["text"], name)["input_ids"][0].numpy().astype(np.int32)
+        embs.append(ref.encode_text(m, t["text"], name))
     return np.stack(embs), ids
+
+
+def check_pixel_contract(patches, pos, u8, bucket, ids, image_token_id) -> None:
+    """The processor saw exactly our bucket image: no second resize, patches equal to `u8 * f32(1/255)` in
+    upstream patch order (bit for bit), positions equal to the bucket's meshgrid."""
+    n_image = int((ids == image_token_id).sum())
+    if len(patches) != bucket.tokens * POOL**2 or n_image != bucket.tokens:
+        raise AssertionError(f"processor resized a {bucket.height}x{bucket.width} bucket image again "
+                             f"({len(patches)} patches, {n_image} image tokens, expected {bucket.tokens})")
+    if not np.array_equal(patches, pixels.patchify(u8)):
+        raise AssertionError(f"processor patches differ from patchify(u8) for {bucket.function_name}: "
+                             f"max abs diff {np.abs(patches - pixels.patchify(u8)).max()}")
+    if not np.array_equal(pos, pixels.patch_positions(bucket.height, bucket.width)):
+        raise AssertionError(f"image_position_ids are not the {bucket.function_name} meshgrid")
 
 
 def run_image(m, img, budget: int) -> dict:
     """Both paths for one image at one budget: `raw` (the processor resizes) and `bucket` (we resize first)."""
     bucket = choose_bucket(img.height, img.width, budget)
-    bimg, chw = ref.resize_to_bucket(img, bucket)
+    bimg, u8 = ref.resize_to_bucket(img, bucket)
     feats = ref.image_features(m, bimg, budget)
     patches, pos = ref.valid_patches(feats)
     ids = feats["input_ids"][0].numpy().astype(np.int32)
-    n_image = int((ids == ref.hf_model(m).config.image_token_id).sum())
-    if len(patches) != bucket.tokens * POOL**2 or n_image != bucket.tokens:
-        raise AssertionError(f"processor resized a {bucket.height}x{bucket.width} bucket image again "
-                             f"({len(patches)} patches, expected {bucket.tokens * POOL**2})")
+    check_pixel_contract(patches, pos, u8, bucket, ids, ref.hf_model(m).config.image_token_id)
     return {"bucket": bucket, "emb_raw": ref.encode_image(m, img, budget),
             "emb_bucket": ref.encode_image(m, bimg, budget),
-            "pixel_values": patches, "image_position_ids": pos, "input_ids": ids,
-            "patchify_max_abs_diff": float(np.abs(patches - ref.patches_of(chw)).max())}
+            "raw_soft_tokens": ref.processor_soft_tokens(m, img, budget),
+            "pixels": u8, "image_position_ids": pos, "input_ids": ids}
 
 
-def run_images(m, images: list[dict], out: Path, log) -> dict[int, dict]:
-    writers = {b: ref.NpzWriter(out / f"images_{b}.npz") for b in BUDGETS}
-    res = {b: {"emb_raw": [], "emb_bucket": [], "bucket": [], "ids": {}, "first": [], "patch_diff": 0.0}
-           for b in BUDGETS}
-    for i, row in enumerate(images):
-        img = open_image(row)
-        for b in BUDGETS:
-            r, w, acc = run_image(m, img, b), writers[b], res[b]
-            for k in ("pixel_values", "image_position_ids", "input_ids"):
-                w.add(f"{k}_{row['id']}", r[k])
-            acc["emb_raw"].append(r["emb_raw"])
-            acc["emb_bucket"].append(r["emb_bucket"])
-            acc["bucket"].append(r["bucket"].name)
-            acc["ids"][row["id"]] = r["input_ids"]
-            acc["patch_diff"] = max(acc["patch_diff"], r["patchify_max_abs_diff"])
-            if i < N_DETERMINISM:
-                acc["first"].append(r)
-        if i % 20 == 19:
-            log(f"images: {i + 1}/{len(images)}")
-    for b, w in writers.items():
-        acc = res[b]
-        acc["emb_raw"], acc["emb_bucket"] = np.stack(acc["emb_raw"]), np.stack(acc["emb_bucket"])
-        w.add("order", np.array([r["id"] for r in images]))
-        w.add("bucket", np.array(acc["bucket"]))
-        w.add("height", np.array([r["height"] for r in images], dtype=np.int32))
-        w.add("width", np.array([r["width"] for r in images], dtype=np.int32))
-        w.add("raw_soft_tokens", np.array([_raw_tokens(r, b) for r in images], dtype=np.int32))
-        w.add("emb_raw", acc["emb_raw"])
-        w.add("emb_bucket", acc["emb_bucket"])
-        w.close()
+def run_images(m, images: list[dict], sample: set[str], out: Path, log) -> dict[int, BudgetResult]:
+    res = {b: BudgetResult(b) for b in BUDGETS}
+    with contextlib.ExitStack() as stack:
+        writers = {b: stack.enter_context(artifacts.NpzWriter(out / f"images_{b}.npz")) for b in BUDGETS}
+        for i, row in enumerate(images):
+            img = open_image(row)
+            for b in BUDGETS:
+                r, w, acc = run_image(m, img, b), writers[b], res[b]
+                for k in ("pixels", "image_position_ids", "input_ids"):
+                    w.add(f"{k}_{row['id']}", r[k])
+                acc.order.append(row["id"])
+                acc.bucket.append(r["bucket"].name)
+                acc.emb_raw.append(r["emb_raw"])
+                acc.emb_bucket.append(r["emb_bucket"])
+                acc.raw_soft_tokens.append(r["raw_soft_tokens"])
+                acc.ids[row["id"]] = r["input_ids"]
+                if row["id"] in sample:
+                    acc.sample[row["id"]] = r
+            if i % 20 == 19:
+                log(f"images: {i + 1}/{len(images)}")
+        for b, w in writers.items():
+            acc = res[b]
+            w.add("order", np.array(acc.order))
+            w.add("bucket", np.array(acc.bucket))
+            w.add("height", np.array([r["height"] for r in images], dtype=np.int32))
+            w.add("width", np.array([r["width"] for r in images], dtype=np.int32))
+            w.add("raw_soft_tokens", np.array(acc.raw_soft_tokens, dtype=np.int32))
+            w.add("emb_raw", np.stack(acc.emb_raw))
+            w.add("emb_bucket", np.stack(acc.emb_bucket))
     return res
 
 
-def _raw_tokens(row: dict, budget: int) -> int:
-    h, w = aspect_preserving_size(row["height"], row["width"], budget)
-    return (h // 48) * (w // 48)
-
-
-def path_agreement(m, texts: list[dict], images: list[dict]) -> dict:
-    """Cosine between `encode` and the manual path, on t000 and the first 2 images at both budgets."""
+def path_agreement(m, texts: list[dict], images: list[dict]) -> dict[str, float]:
+    """Cosine between `encode` and the manual path; raises below MIN_PATH_COSINE."""
     cos = {}
-    t = texts[0]
-    cos[t["id"]] = float(ref.encode_text(m, t["text"], "query") @ ref.manual_embedding(
-        m, ref.text_features(m, t["text"], "query")))
-    for row in images[:2]:
+    for t in texts:
+        name = ref.prompt_name(t["kind"])
+        cos[t["id"]] = float(ref.encode_text(m, t["text"], name)
+                             @ ref.manual_embedding(m, ref.text_features(m, t["text"], name)))
+    for row in images:
         img = open_image(row)
         for b in BUDGETS:
-            cos[f"{row['id']}@{b}"] = float(ref.encode_image(m, img, b) @ ref.manual_embedding(
-                m, ref.image_features(m, img, b)))
+            cos[f"{row['id']}@{b}"] = float(ref.encode_image(m, img, b)
+                                            @ ref.manual_embedding(m, ref.image_features(m, img, b)))
+    if min(cos.values()) <= MIN_PATH_COSINE:
+        raise AssertionError(f"encode and the manual path disagree: {cos}")
     return cos
 
 
 def write_debug(m, text: dict, image_row: dict, out: Path) -> list[str]:
     outs, ins = ref.debug_hooks(m)
+    name = ref.prompt_name(text["kind"])
     with ref.capture(outs, ins) as s:
-        ref.encode_text(m, text["text"], "query")
+        ref.encode_text(m, text["text"], name)
     arrays = {f"text_{k}": v for k, v in s.items()}
-    arrays["text_input_ids"] = ref.text_features(m, text["text"], "query")["input_ids"][0].numpy().astype(np.int32)
+    arrays["text_input_ids"] = ref.text_features(m, text["text"], name)["input_ids"][0].numpy().astype(np.int32)
     img = open_image(image_row)
-    bimg, _ = ref.resize_to_bucket(img, choose_bucket(img.height, img.width, 70))
+    bimg, u8 = ref.resize_to_bucket(img, choose_bucket(img.height, img.width, 70))
     with ref.capture(outs, ins) as s:
         ref.encode_image(m, bimg, 70)
     arrays |= {f"image_{k}": v for k, v in s.items()}
     feats = ref.image_features(m, bimg, 70)
     arrays["image_input_ids"] = feats["input_ids"][0].numpy().astype(np.int32)
-    arrays["image_pixel_values"], arrays["image_position_ids"] = ref.valid_patches(feats)
-    np.savez(out / "debug.npz", **arrays)
+    arrays["image_pixels"] = u8
+    arrays["image_position_ids"] = ref.valid_patches(feats)[1]
+    with artifacts.NpzWriter(out / "debug.npz") as w:
+        for k, v in arrays.items():
+            w.add(k, v)
     return sorted(arrays)
 
 
-def write_layout(m, images: list[dict], res: dict, text_ids: np.ndarray, out: Path) -> dict:
-    tok = ref.tokenizer(m)
-    cfg = ref.hf_model(m).config
+def write_layout(m, images: list[dict], res: dict[int, BudgetResult], text: dict, text_ids, out: Path) -> dict:
+    tok, cfg = ref.tokenizer(m), ref.hf_model(m).config
     special = {"pad": tok.pad_token_id, "bos": tok.bos_token_id, "eos": tok.eos_token_id,
                "boi": cfg.boi_token_id, "image": cfg.image_token_id, "eoi": cfg.eoi_token_id}
-    buckets, patterns = {}, set()
+    buckets = {}
     for bucket in BUCKETS:
-        names = res[bucket.budget]["bucket"]
-        i = names.index(bucket.name)
-        ids = res[bucket.budget]["ids"][images[i]["id"]].tolist()
-        expected = [special["bos"], special["boi"], *[special["image"]] * bucket.tokens, special["eoi"], special["eos"]]
-        patterns.add(ids == expected)
+        acc = res[bucket.budget]
+        i = acc.bucket.index(bucket.name)
+        ids = acc.ids[acc.order[i]].tolist()
         buckets[bucket.function_name] = {
-            "fixture": images[i]["id"], "budget": bucket.budget, "bucket": bucket.name, "height": bucket.height,
+            "fixture": acc.order[i], "budget": bucket.budget, "bucket": bucket.name, "height": bucket.height,
             "width": bucket.width, "soft_tokens": bucket.tokens, "length": len(ids), "input_ids": ids,
             "tokens": tok.convert_ids_to_tokens(ids)}
-    layout = {
-        "special_token_ids": special,
-        "image_sequence": "<bos> <|image> <|image|> x soft_tokens <image|> <eos>"
-                          if patterns == {True} else "DIFFERS per bucket: read input_ids",
-        "matches_bos_boi_image_eoi_eos": patterns == {True},
-        "text_example": {"fixture": "t000", "prompt_name": "query", "input_ids": text_ids.tolist(),
-                         "tokens": tok.convert_ids_to_tokens(text_ids.tolist())},
-        "buckets": buckets,
-    }
-    (out / "image_token_layout.json").write_text(json.dumps(layout, indent=1, ensure_ascii=False) + "\n")
-    return layout
+    example = {"fixture": text["id"], "prompt_name": ref.prompt_name(text["kind"]), "input_ids": text_ids.tolist(),
+               "tokens": tok.convert_ids_to_tokens(text_ids.tolist())}
+    return artifacts.write_layout(out, special, buckets, example)
 
 
-def check_determinism(m, texts, images, text_emb, text_ids, res) -> list[str]:
-    """Rerun the first N_DETERMINISM texts and images and list every array that is not bitwise identical."""
+def check_determinism(m, texts: list[dict], sample_texts: list[dict], images: list[dict], text_emb, text_ids,
+                      res: dict[int, BudgetResult]) -> list[str]:
+    """Rerun the sample in-process and list every array that is not bitwise identical to the first pass."""
     bad = []
-    emb2, ids2 = run_texts(m, texts[:N_DETERMINISM])
-    if not np.array_equal(emb2, text_emb[:N_DETERMINISM]):
-        bad.append("text emb")
-    bad += [f"text ids {k}" for k, v in ids2.items() if not np.array_equal(v, text_ids[k])]
-    for i, row in enumerate(images[:N_DETERMINISM]):
+    index = {t["id"]: i for i, t in enumerate(texts)}
+    emb2, ids2 = run_texts(m, sample_texts)
+    for k, e in zip(ids2, emb2, strict=True):
+        if not np.array_equal(e, text_emb[index[k]]) or not np.array_equal(ids2[k], text_ids[k]):
+            bad.append(f"text {k}")
+    for row in images:
+        if row["id"] not in res[BUDGETS[0]].sample:
+            continue
         img = open_image(row)
         for b in BUDGETS:
-            again, first = run_image(m, img, b), res[b]["first"][i]
-            for k in ("emb_raw", "emb_bucket", "pixel_values", "image_position_ids", "input_ids"):
+            again, first = run_image(m, img, b), res[b].sample[row["id"]]
+            for k in ("emb_raw", "emb_bucket", "pixels", "image_position_ids", "input_ids", "raw_soft_tokens"):
                 if not np.array_equal(again[k], first[k]):
                     bad.append(f"{row['id']}@{b} {k}")
     return bad
+
+
+def samples(texts: list[dict], images: list[dict], text_ids: dict) -> tuple[list[dict], list[dict]]:
+    """The determinism and path-agreement sample: the first query, the first document, the longest text, and the
+    first image of each bucket shape."""
+    longest = max(texts, key=lambda t: len(text_ids[t["id"]]))
+    picked_t = {next(t["id"] for t in texts if t["kind"] == k) for k in ("query", "document")} | {longest["id"]}
+    shapes: dict[str, str] = {}
+    for r in images:
+        shapes.setdefault(choose_bucket(r["height"], r["width"], BUDGETS[0]).name, r["id"])
+    return [t for t in texts if t["id"] in picked_t], [r for r in images if r["id"] in set(shapes.values())]
 
 
 def fill(report: Report) -> None:
@@ -198,33 +234,37 @@ def fill(report: Report) -> None:
     def log(msg: str) -> None:
         print(f"[s0 {time.monotonic() - t_start:7.1f}s] {msg}", flush=True)
 
+    if problems := verify_manifest():
+        raise RuntimeError(f"fixtures do not match MANIFEST.sha256: {problems[:10]}")
     out = stage_dir(STAGE)
     snap = download()
     (out / "revision.txt").write_text(HF_REVISION + "\n")
-    keys = write_keys(snap, out)
+    tensors = tensor_inventory(snap)
+    artifacts.write_keys(tensors, out)
     prefixes: dict[str, int] = {}
-    for k in keys:
+    for k in tensors:
         prefixes[k.split(".")[0]] = prefixes.get(k.split(".")[0], 0) + 1
     lic = card_license(snap)
-    log(f"revision {HF_REVISION}, {len(keys)} keys, license {lic}")
+    log(f"revision {HF_REVISION}, {len(tensors)} keys, license {lic}")
 
     m = ref.load(snap)
     texts, images = load_texts(), load_images()
     text_emb, text_ids = run_texts(m, texts)
-    np.savez(out / "texts.npz", emb=text_emb, order=np.array([t["id"] for t in texts]),
-             **{f"ids_{k}": v for k, v in text_ids.items()})
-    longest = max(len(v) for v in text_ids.values())
-    if longest > MAX_TEXT_TOKENS:
-        raise AssertionError(f"a fixture text has {longest} tokens; the longest text function takes {MAX_TEXT_TOKENS}")
-    log(f"texts: {len(texts)} embedded, longest {longest} tokens")
-    res = run_images(m, images, out, log)
-    agreement = path_agreement(m, texts, images)
+    longest = max(texts, key=lambda t: len(text_ids[t["id"]]))
+    if len(text_ids[longest["id"]]) > MAX_TEXT_TOKENS:
+        raise AssertionError(f"{longest['id']} has {len(text_ids[longest['id']])} tokens; "
+                             f"the longest text function takes {MAX_TEXT_TOKENS}")
+    sample_texts, sample_images = samples(texts, images, text_ids)
+    agreement = path_agreement(m, sample_texts, images[:2])
+    log(f"texts: {len(texts)} embedded, longest {longest['id']} ({len(text_ids[longest['id']])} tokens); "
+        f"path agreement min {min(agreement.values()):.8f}")
+    artifacts.write_texts(out, [t["id"] for t in texts], text_emb, text_ids)
+
+    res = run_images(m, images, {r["id"] for r in sample_images}, out, log)
     debug_keys = write_debug(m, texts[0], images[0], out)
-    layout = write_layout(m, images, res, text_ids["t000"], out)
+    layout = write_layout(m, images, res, texts[0], text_ids[texts[0]["id"]], out)
     log("checking determinism")
-    nondeterministic = check_determinism(m, texts, images, text_emb, text_ids, res)
-    if min(agreement.values()) <= MIN_PATH_COSINE:
-        raise AssertionError(f"encode and the manual path disagree: {agreement}")
+    nondeterministic = check_determinism(m, texts, sample_texts, images, text_emb, text_ids, res)
 
     import sentence_transformers
     import torch
@@ -232,25 +272,25 @@ def fill(report: Report) -> None:
 
     report.metrics["license_apache"] = lic == "apache-2.0"
     report.metrics["key_inventory_written"] = (
-        (out / "keys.json").is_file() and len(keys) > 0
+        (out / "keys.json").is_file() and len(tensors) > 0
         and all(prefixes.get(p, 0) > 0 for p in ("language_model", "vision_tower", "embed_vision")))
     report.metrics["deterministic"] = not nondeterministic
     report.metrics["path_agreement_min_cosine"] = min(agreement.values())
     report.details = {
-        "revision": HF_REVISION, "license": lic, "embedding_path": EMBEDDING_PATH,
+        "revision": HF_REVISION, "model_sha256": HF_MODEL_SHA256, "license": lic, "embedding_path": EMBEDDING_PATH,
         "path_agreement_cosine": agreement, "nondeterministic": nondeterministic,
-        "determinism_items": N_DETERMINISM, "key_count": len(keys), "key_prefixes": prefixes,
-        "model_blob": (snap / "model.safetensors").resolve().name,
+        "determinism_sample": [t["id"] for t in sample_texts] + [r["id"] for r in sample_images],
+        "key_count": len(tensors), "key_prefixes": prefixes,
         "versions": {"transformers": transformers.__version__, "torch": torch.__version__,
                      "sentence_transformers": sentence_transformers.__version__}, "torch_threads": ref.THREADS,
         "texts": len(texts), "images": len(images),
-        "text_token_lengths": {"max": max(len(v) for v in text_ids.values()), "t199": len(text_ids["t199"])},
-        "bucket_counts": {b: {n: res[b]["bucket"].count(n) for n in sorted(set(res[b]["bucket"]))} for b in BUDGETS},
-        "patchify_max_abs_diff": {b: res[b]["patch_diff"] for b in BUDGETS},
+        "longest_text": {"id": longest["id"], "tokens": len(text_ids[longest["id"]])},
+        "bucket_counts": {b: {n: res[b].bucket.count(n) for n in sorted(set(res[b].bucket))} for b in BUDGETS},
+        "raw_vs_bucket_cosine": {b: res[b].raw_vs_bucket() for b in BUDGETS},
         "image_sequence": layout["image_sequence"], "debug_arrays": debug_keys,
         "seconds": round(time.monotonic() - t_start, 1),
     }
-    log(f"done: deterministic={not nondeterministic}, agreement min {min(agreement.values()):.8f}")
+    log(f"done: deterministic={not nondeterministic}, raw_vs_bucket {report.details['raw_vs_bucket_cosine']}")
 
 
 def main() -> None:

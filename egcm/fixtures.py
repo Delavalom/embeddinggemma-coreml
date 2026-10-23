@@ -10,11 +10,15 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
-from egcm.paths import FIXTURES
+from egcm.paths import ARTIFACTS, FIXTURES
 
 MANIFEST = "MANIFEST.sha256"
+# The processor rescales uint8 pixels by multiplying with this float32 constant (not by dividing by 255).
+U8_SCALE = np.float32(1 / 255)
+S0_DIR = ARTIFACTS / "s0_reference"
 
 
 def _read_jsonl(p: Path) -> list[dict]:
@@ -85,3 +89,22 @@ def verify_manifest(root: Path = FIXTURES) -> list[str]:
         f"hash mismatch: {rel}" for rel in sorted(set(listed) & on_disk) if sha256_file(root / rel) != listed[rel]
     ]
     return problems
+
+
+def to_unit(u8: np.ndarray) -> np.ndarray:
+    """uint8 pixels -> float32 in [0, 1], exactly as the reference processor does it."""
+    if u8.dtype != np.uint8:
+        raise TypeError(f"expected uint8 pixels, got {u8.dtype}")
+    return u8.astype(np.float32) * U8_SCALE
+
+
+def load_bucket_pixels(budget: int, image_id: str, s0_dir: Path = S0_DIR) -> np.ndarray:
+    """The bucket-resized image s0 fed the reference model, as float32 [1, 3, H, W] in [0, 1].
+
+    s0 stores it as uint8 HxWx3 (`pixels_<id>` in images_<budget>.npz); this is the one place that turns it back
+    into model input: `u8.astype(np.float32) * np.float32(1/255)`, channels first. Every downstream stage uses it."""
+    with np.load(Path(s0_dir) / f"images_{budget}.npz") as z:
+        u8 = z[f"pixels_{image_id}"]
+    if u8.ndim != 3 or u8.shape[2] != 3:
+        raise ValueError(f"pixels_{image_id} has shape {u8.shape}, expected HxWx3")
+    return np.ascontiguousarray(to_unit(u8).transpose(2, 0, 1)[None])

@@ -106,7 +106,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 
 | Stage | What it does | Gate |
 |---|---|---|
-| **s0_reference** | Downloads the weights (revision pinned by commit SHA), runs the official `sentence-transformers` model in FP32 on CPU. Writes golden 768-d vectors, token ids, preprocessed pixel tensors and the exact image token sequence. Also lists every weight key and shape | deterministic: two runs give identical files. License recorded as Apache-2.0. Key inventory written |
+| **s0_reference** | Downloads the weights (revision pinned by commit SHA), runs the official `sentence-transformers` model in FP32 on CPU. Writes golden 768-d vectors, token ids, preprocessed pixel tensors and the exact image token sequence. Also lists every weight key and shape | deterministic: an in-process rerun of a sample (one image per bucket shape, a query, a document, the longest text) is bitwise identical. License recorded as Apache-2.0. Key inventory written. Enforced (raises): fixtures match the manifest, model sha256, `encode` agrees with the manual path, bit-exact pixel contract |
 | **s1_rewrite** | Our PyTorch rewrite, FP32, same inputs | min cosine ≥ 0.9999 (text and image). Strict weight load |
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | min cosine ≥ 0.995, and ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
