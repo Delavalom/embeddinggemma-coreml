@@ -101,7 +101,7 @@ enum IndexFile {
 
       // Convert runs of consecutive live slots in bounded chunks.
       let chunkRows = max(1, min(1024, (1 << 20) / dimensions))
-      var chunk = [Float16](repeating: 0, count: chunkRows * dimensions)
+      var chunk = [UInt16](repeating: 0, count: chunkRows * dimensions)  // FP16 bits
       let slotCount = idBySlot.count
       try vectors.withUnsafeBufferPointer { src in
         var s = 0
