@@ -117,7 +117,7 @@ embeddinggemma-coreml/
   fixtures/images/*.{jpg,png}  fixtures/images.jsonl  fixtures/texts.jsonl  fixtures/MANIFEST.sha256
   docs/decisions/ADR-0001-ane-rewrite.md  docs/decisions/ADR-0002-image-buckets.md  docs/RESULTS.md
   swift/Package.swift
-  swift/Sources/EmbeddingGemma/{EmbeddingGemma.swift,Task.swift,Errors.swift,DeviceTier.swift,
+  swift/Sources/EmbeddingGemma/{EmbeddingGemma.swift,EmbeddingTask.swift,Errors.swift,DeviceTier.swift,
        Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,ModelStore.swift,Checksums.swift}
   swift/Sources/EmbeddingIndex/{VectorIndex.swift,IndexFile.swift}
   swift/Sources/egcm-parity/main.swift  # s5 CLI
@@ -1111,7 +1111,7 @@ def palettize4(m):
 
 ### Task 16: Swift package, part 1 (tokenizer, buckets, preprocessing)
 
-**Files:** create `swift/Package.swift`, `Sources/EmbeddingGemma/{Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,Task.swift,Errors.swift}`, and tests.
+**Files:** create `swift/Package.swift`, `Sources/EmbeddingGemma/{Buckets.swift,ImagePreprocessor.swift,TextEncoder.swift,EmbeddingTask.swift,Errors.swift}`, and tests.
 
 - [ ] **Step 1: Write `Package.swift`.**
 
@@ -1160,7 +1160,7 @@ let package = Package(
 - [ ] **Step 3: `EmbeddingGemma.swift`.** The actor from spec §8:
   - `load` → ModelStore → for each needed function, `MLModel(contentsOf:configuration:)` with `MLModelConfiguration.functionName = fn` and `computeUnits = .cpuAndNeuralEngine`. Image functions are loaded lazily per bucket at the chosen budget; text functions lazily per length.
   - `embed(image:)` → preprocess → predict → take the `embedding` (768) → truncate to `dimensions` → L2 normalize → `[Float]`.
-  - `embed(query:)` uses the prompt `task: search result | query: `; `embed(text:task:)` maps `Task.document → "title: none | text: "`, `.classification → "task: classification | query: "`, `.clustering → "task: clustering | query: "`.
+  - `embed(query:)` uses the prompt `task: search result | query: `; `embed(text:task:)` maps `EmbeddingTask.document → "title: none | text: "`, `.classification → "task: classification | query: "`, `.clustering → "task: clustering | query: "`.
   - `modelRevision` is the HF commit SHA.
 - [ ] **Step 4: Run it.** `swift test`. Expected: PASS (end-to-end tests skip cleanly if `artifacts/s4_compress` is missing, with message "run just stage 4").
 - [ ] **Step 5: Commit.** `git commit -am "feat(swift): model runtime + verified downloader"`
@@ -1177,8 +1177,6 @@ import Foundation
 @testable import EmbeddingIndex
 
 func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
-  var g = SystemRandomNumberGenerator() // replaced by seeded LCG below for determinism
-  _ = g
   var s = seed
   return (0..<n).map { _ in
     let v = (0..<d).map { _ -> Float in s = s &* 6364136223846793005 &+ 1; return Float(Int64(bitPattern: s >> 11) % 2000) / 1000 - 1 }
@@ -1188,7 +1186,7 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 
 @Test func topKMatchesBruteForce() throws {
   let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-  var idx = try VectorIndex(url: url, dimensions: 64, modelRevision: "r1")
+  let idx = try VectorIndex(url: url, dimensions: 64, modelRevision: "r1")
   let vs = rand(500, 64, seed: 7)
   for (i, v) in vs.enumerated() { try idx.upsert(id: "a\(i)", vector: v) }
   let q = vs[42]
@@ -1201,7 +1199,7 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 
 @Test func persistsAndRejectsOtherRevision() throws {
   let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-  var idx = try VectorIndex(url: url, dimensions: 8, modelRevision: "r1")
+  let idx = try VectorIndex(url: url, dimensions: 8, modelRevision: "r1")
   try idx.upsert(id: "x", vector: [1,0,0,0,0,0,0,0]); try idx.save()
   let again = try VectorIndex(url: url, dimensions: 8, modelRevision: "r1")
   #expect(again.vector(for: "x")?.first == 1)
@@ -1212,7 +1210,7 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 
 @Test func removeAndFilter() throws {
   let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-  var idx = try VectorIndex(url: url, dimensions: 4, modelRevision: "r")
+  let idx = try VectorIndex(url: url, dimensions: 4, modelRevision: "r")
   try idx.upsert(id: "a", vector: [1,0,0,0]); try idx.upsert(id: "b", vector: [0.9,0.1,0,0])
   try idx.remove(id: "a")
   #expect(idx.search([1,0,0,0], k: 2).map(\.id) == ["b"])
@@ -1222,10 +1220,11 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 
 - [ ] **Step 2: Run them.** `swift test --filter VectorIndex`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
-  - **Storage:** in-memory `[Float16]` contiguous buffer `count × dims`, `ids: [String]`, `slot: [String: Int]`, and a free-slot list for removals.
-  - **`search`:** convert the query to Float, then `vDSP_mmul` (or `cblas_sgemv`) over a Float32 shadow buffer, rebuilt lazily after mutations; the Float16→Float32 conversion uses `vImageConvert_Planar16FtoPlanarF`. Then partial top-k with a min-heap of size k, skipping filtered and removed slots.
-  - **`IndexFile`:** header `"EGIX"` + version u32 + dims u32 + count u32 + revision length + revision utf8, then the FP16 block, then an ids JSON. Writes are atomic (`.atomic`).
-  - `VectorIndexError: Equatable { case revisionMismatch(expected: String, found: String), dimensionMismatch(Int, Int), corrupt }`.
+  - **Type:** `public final class VectorIndex` (not `Sendable`; one owner, normally an actor). A struct would silently copy 50+ MB on write.
+  - **Storage:** one contiguous `[Float]` buffer `slotCount × dims` holding `Float(Float16(x))` (so values match after save/reload), `idBySlot: [String?]`, `slotByID: [String: Int]`, and a free-slot list for removals. `reserveCapacity(_:)` pre-sizes it.
+  - **`search`:** `vDSP_mmul` over the Float32 buffer, then partial top-k with a min-heap of `min(k, count)`, skipping filtered and removed slots. Empty index or `k <= 0` returns `[]`; `k` may be `Int.max`.
+  - **`IndexFile` (version 2):** little-endian header `"EGIX"` + version u32 + dims u32 + count u32 + revision length + revision utf8, padded to 16 bytes, then the FP16 block, then an ids JSON. Load widens FP16→F32 straight from the mapped bytes (`vImageConvert_Planar16FtoPlanarF`). Save streams chunks (`vImageConvert_PlanarFtoPlanar16F`) to a temp file and renames it into place (atomic).
+  - `VectorIndexError: Equatable { case revisionMismatch(expected:found:), dimensionMismatch(expected:found:), invalidDimensions(Int), unsupportedVersion(UInt32), corrupt }`.
 - [ ] **Step 4: Add a perf test.** 50k × 256 random, `search` k=50 is < 20 ms on macOS release (`swift test -c release --filter perf`). It's annotated `.timeLimit` and only enforced in release.
 - [ ] **Step 5: Run and commit.** `git commit -am "feat(swift): EmbeddingIndex"`
 
