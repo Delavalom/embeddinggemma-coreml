@@ -20,7 +20,7 @@ Full design: `docs/superpowers/specs/2026-10-22-embeddinggemma-coreml-design.md`
 4. Fixtures only come from `python -m stages.s0_reference.build_fixtures`, which writes `fixtures/MANIFEST.sha256`. `just stage 0` refuses to run without that manifest, and CI checks it (planned: Task 21).
 5. No weights or `.mlpackage` files in git. The `.gitignore` plus a CI size check (no file over 5 MB, `scripts/check_large_files.py`, planned: Task 21) enforce this.
 6. Files stay under about 300 lines and have one job.
-7. When a stage fails, read that stage's README "known failure modes" (planned: each stage's task) before changing code. Any new failure mode found gets added to it.
+7. When a stage fails, read that stage's README "known failure modes" (s0 has one; the others land with each stage's task) before changing code. Any new failure mode found gets added to it.
 
 ## Commands
 
@@ -37,7 +37,7 @@ just bench-device      # run the s6 benchmark on the connected iPhone (planned: 
 just publish           # s7. Refuses to run unless s0–s6 pass AND --confirm is given (planned: Task 22)
 ```
 
-`just stage N` needs `stages/sN_*/run.py` (planned: Task 6 for s0, then one per stage). Line 1 of each `run.py` is `# group: convert` or `# group: reference`; the recipe runs it with `uv run --exact --group <that group>`, then regenerates `STATUS.md` and keeps the stage's exit code.
+`just stage N` needs `stages/sN_*/run.py` (s0 exists; the rest are planned, one per stage). Line 1 of each `run.py` is `# group: convert` or `# group: reference`; the recipe runs it with `uv run --exact --group <that group>`, then regenerates `STATUS.md` and keeps the stage's exit code.
 
 Python unit tests only: `uv run --exact --group convert pytest -q`.
 

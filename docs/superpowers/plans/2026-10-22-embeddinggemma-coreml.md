@@ -48,7 +48,9 @@
 - **Clipped linears:** `use_clipped_linears = False` for vision, so they are plain linears. Weight keys are `...q_proj.linear.weight`.
 - **Pooler:** zero the padding → average each 3×3 patch block (row-major over blocks) → `* sqrt(768)` in FP32 → (standardize = False).
 - **`embed_vision`:** `RMSNorm_768(no weight)` → Linear(768→512). RMSNorm without weight is scale-invariant, so **the rewrite drops the `* sqrt(768)`** (an exact identity apart from eps, ~1e-6 relative). This removes the one FP16 overflow upstream had to call out.
-- **Image sequence:** the image soft tokens replace `<|image|>` placeholders inside `"<|image>" + "<|image|>"*n + "<image|>"`. The exact full token list, including any bos/eos, **is recorded by s0**.
+- **Image sequence (recorded by s0 in `image_token_layout.json`, identical in shape for all ten buckets):** `[<bos>=2, <|image>=255999, <|image|>=258880 × soft_tokens, <image|>=258882, <eos>=1]`, so the length is soft_tokens + 4 (64 to 284 tokens). The soft tokens replace the `<|image|>` placeholders as `embed_vision` outputs, **unscaled**; the other four tokens are `embed_tokens(id) * sqrt(512)` (exactly `512**0.5` in FP32, checked against `debug.npz`). PLE is computed from this merged `inputs_embeds`. Mean pooling covers all tokens, including bos, eos, `<|image>` and `<image|>`.
+- **Text sequence (recorded by s0 in `texts.npz`):** `[<bos>=2] + tokens(prompt + text) + [<eos>=1]`, with the prompt `task: search result | query: ` (queries) or `title: none | text: ` (documents) concatenated as plain text. The longest fixture text (t199) is exactly 128 tokens, so every fixture text fits `embed_text_128`.
+- **Processor patches:** `pixel_values` are padded to `budget·9` rows with position `(-1, -1)`; s0 stores only the valid rows. They equal `uint8 / 255` patchified to within 6e-8 (the processor multiplies by `1/255`).
 
 **Image preprocessing:**
 1. Convert to RGB, then resize with bicubic + antialias (`resample: 3`) to the largest size that keeps aspect ratio, whose sides are multiples of 48, and whose area is ≤ budget·9·256.
@@ -580,6 +582,8 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 - [ ] **Step 5: Commit.** `git add fixtures stages/s0_reference/build_fixtures.py egcm/fixtures.py tests/test_fixtures_manifest.py && git commit -m "feat: CC0 fixtures"`. The total fixture size must stay under 60 MB. If it doesn't, downscale the Commons photos to a 1600-px max side at build time.
 
 ### Task 6: s0 reference run
+
+> **Implemented, with these changes.** Token ids come from `model.preprocess` (`model.tokenize` is deprecated in sentence-transformers 6.x); the official embedding path is `model.encode({"image": img}, processing_kwargs={"image": {"max_soft_tokens": budget}})`, which agreed with the manual path at cosine ≥ 0.9999998. Model helpers are in `stages/s0_reference/reference.py`. `images_<budget>.npz` stores only the valid (non-padding) patch rows and is written one array at a time. `keys.json` and `image_token_layout.json` matched the Facts and the Task 12 mapping table; the recorded image and text sequences were added to the Facts. The long text t199 was trimmed from 156 to 128 tokens so that it fits `embed_text_128`.
 
 **Files:** create `stages/s0_reference/run.py`, `stages/s0_reference/README.md`.
 
