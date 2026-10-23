@@ -1,6 +1,6 @@
 # ADR-0004: The s5 pixel gate is measured on decode-identical inputs
 
-**Status:** proposed, 2026-10-23 (needs the founder's sign-off; `gates.toml` is unchanged)
+**Status:** accepted, 2026-10-23 (`gates.toml` is unchanged; the gate's input set is what changed)
 
 ## Context
 
