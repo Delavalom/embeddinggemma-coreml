@@ -11,10 +11,10 @@ func loadCGImage(_ url: URL) throws -> CGImage {
   return try #require(CGImageSourceCreateImageAtIndex(src, 0, nil))
 }
 
-/// A width x height RGB image whose pixel (x, y) is (x, y, 7), drawn in sRGB.
+/// A width x height RGB image whose pixel (x, y) is (x % 256, y % 256, 7), drawn in sRGB.
 func gradient(width: Int, height: Int) throws -> CGImage {
   var bytes = [UInt8](repeating: 255, count: width * height * 4)
-  for y in 0..<height { for x in 0..<width { bytes[(y * width + x) * 4] = UInt8(x); bytes[(y * width + x) * 4 + 1] = UInt8(y); bytes[(y * width + x) * 4 + 2] = 7 } }
+  for y in 0..<height { for x in 0..<width { bytes[(y * width + x) * 4] = UInt8(x % 256); bytes[(y * width + x) * 4 + 1] = UInt8(y % 256); bytes[(y * width + x) * 4 + 2] = 7 } }
   let ctx = try #require(CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
                                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))

@@ -23,10 +23,31 @@ enum TestSupport {
   static let testFixtures = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "Fixtures")
   static let s4Dir = repoRoot.appending(path: "artifacts/s4_compress")
 
-  /// The s4 model package, if stage 4 has run. End-to-end tests are skipped without it.
+  /// The s4 model package, if stage 4 has run (`EmbeddingGemma2.mlpackage` if present, else the first
+  /// `.mlpackage`). End-to-end tests are skipped without it.
   static var s4Package: URL? {
     let items = (try? FileManager.default.contentsOfDirectory(at: s4Dir, includingPropertiesForKeys: nil)) ?? []
-    return items.filter { $0.pathExtension == "mlpackage" }.sorted { $0.path < $1.path }.first
+    let packages = items.filter { $0.pathExtension == "mlpackage" }.sorted { $0.path < $1.path }
+    return packages.first { $0.lastPathComponent == ModelStore.packageName } ?? packages.first
+  }
+
+  /// The contract model of stages/s5_swift/make_contract_model.py, if it was built.
+  static var contractPackage: URL? {
+    let url = repoRoot.appending(path: "artifacts/s5_swift/contract/\(ModelStore.packageName)")
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+  }
+
+  /// A local published folder (the Hugging Face layout) for `package`: the package cloned in (APFS clones cost no
+  /// space), the tokenizer under tokenizer/, and files.json.
+  static func publish(package: URL) async throws -> URL {
+    let root = tempDir().appending(path: "published")
+    let tok = root.appending(path: ModelStore.tokenizerDir)
+    try FileManager.default.createDirectory(at: tok, withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: package, to: root.appending(path: ModelStore.packageName))
+    let cache = try await tokenizerFolder()
+    for f in tokenizerFiles { try FileManager.default.copyItem(at: cache.appending(path: f.path), to: tok.appending(path: f.path)) }
+    try FilesManifest.write(root: root)
+    return root
   }
 
   /// The tokenizer folder (tokenizer.json + tokenizer_config.json), downloaded on first use.
