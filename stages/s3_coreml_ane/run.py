@@ -17,7 +17,8 @@ import numpy as np
 from egcm import parts, probe
 from egcm.config import HF_SNAPSHOT, load
 from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
-from egcm.evaluate import Package, latency_ms, run_images, run_texts, text_feed
+from egcm.e5cache import PurgingPackage
+from egcm.evaluate import latency_ms, run_images, run_texts, text_feed
 from egcm.functions import FUNCTIONS
 from egcm.paths import stage_dir
 from egcm.placement import ane_placement
@@ -60,7 +61,7 @@ def fill(report: Report) -> None:
     log(f"Neural Engine fraction min {report.metrics['min_ane_fraction']:.4f}; off-ANE ops: "
         f"{ {k: v['off_ane'] for k, v in placement.items() if v['off_ane']} }")
 
-    p = Package(compiled, UNITS)
+    p = PurgingPackage(compiled, UNITS)
     texts = run_texts(p, pad_id)
     report.metrics["min_cosine_text"] = float(texts["cos"].min())
     report.details["text"] = {"by_function": texts["by_function"]}
@@ -73,6 +74,7 @@ def fill(report: Report) -> None:
              "embed_image_70_square": {"pixels": np.random.default_rng(0).random((1, 3, 384, 384), np.float32)}}
     report.details["latency_cpu_and_ne"] = {fn: latency_ms(p, fn, feeds[fn]) for fn in LATENCY}
     log(f"latency: {report.details['latency_cpu_and_ne']}")
+    p.close()
     del p
     if not KEEP:
         shutil.rmtree(compiled, ignore_errors=True)

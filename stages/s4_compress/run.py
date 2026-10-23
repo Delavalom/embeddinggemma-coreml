@@ -17,7 +17,8 @@ from egcm import parts
 from egcm.compress import RECIPES
 from egcm.config import HF_SNAPSHOT, load
 from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
-from egcm.evaluate import Package, latency_ms, run_images, run_texts, text_feed
+from egcm.e5cache import PurgingPackage
+from egcm.evaluate import latency_ms, run_images, run_texts, text_feed
 from egcm.functions import FUNCTIONS
 from egcm.gates import gates as stage_gates
 from egcm.paths import stage_dir
@@ -43,7 +44,7 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
         raise AssertionError(f"{recipe}: I/O contract mismatch: {problems}")
     ranking.zip_package(pkg, zipped)
     compile_package(pkg, compiled)
-    p = Package(compiled, UNITS)
+    p = PurgingPackage(compiled, UNITS)
     texts, images = run_texts(p, pad_id), run_images(p, log=log)
     m = ranking.metrics(texts, images)
     m |= {"description": desc, "package_mb": sizes["package_mb"], "download_mb": size_mb(zipped),
@@ -55,6 +56,7 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     feeds = {"embed_text_16": text_feed(np.array([2, 8071, 236787, 1], np.int32), pad_id)[1],
              "embed_image_70_square": {"pixels": np.random.default_rng(0).random((1, 3, 384, 384), np.float32)}}
     m["latency_cpu_and_ne"] = {fn: latency_ms(p, fn, f) for fn, f in feeds.items()}
+    p.close()
     del p
     ranking.remove(compiled)
     log(f"{recipe}: download {m['download_mb']:.0f} MB, min cosine {m['min_cosine']:.5f}, recall@10 "
