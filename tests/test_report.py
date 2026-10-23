@@ -1,22 +1,46 @@
-from egcm.report import Report, write_report, read_report, evaluate
+import json
+import math
 
-def test_roundtrip_and_pass(tmp_path):
-    r = Report(stage="s1_rewrite", git_sha="abc", inputs_sha256="x", metrics={"min_cosine_text": 0.99995},
-               gate_values={"min_cosine_text": 0.9999})
-    r = evaluate(r, {"min_cosine_text": ">="})
-    assert r.passed and r.failures == []
+import pydantic
+import pytest
+
+from egcm.report import Report, read_report, write_report
+
+
+def test_roundtrip(tmp_path):
+    r = Report(stage="s1_rewrite", status="passed", passed=True, metrics={"min_cosine_text": 0.99995, "ok": True})
     p = write_report(r, tmp_path)
-    assert read_report(p).passed
+    assert p.name == "report.json"
+    assert read_report(p) == r
+    assert not list(tmp_path.glob("*.tmp"))
 
-def test_fail_records_reason(tmp_path):
-    r = evaluate(Report(stage="s3_coreml_ane", git_sha="a", inputs_sha256="x",
-                        metrics={"min_ane_fraction": 0.8}, gate_values={"min_ane_fraction": 0.95}),
-                 {"min_ane_fraction": ">="})
-    assert not r.passed
-    assert "min_ane_fraction" in r.failures[0]
 
-def test_max_gate(tmp_path):
-    r = evaluate(Report(stage="s4_compress", git_sha="a", inputs_sha256="x",
-                        metrics={"max_download_mb": 310.0}, gate_values={"max_download_mb": 300}),
-                 {"max_download_mb": "<="})
-    assert not r.passed
+def test_extra_fields_forbidden():
+    with pytest.raises(pydantic.ValidationError):
+        Report(stage="s1_rewrite", pass_=True)
+
+
+def test_defaults_are_not_passing():
+    r = Report(stage="s1_rewrite")
+    assert r.status == "running" and r.passed is False and r.started_at is None
+
+
+def test_nonfinite_metrics_roundtrip_as_strings(tmp_path):
+    r = Report(stage="s1_rewrite", metrics={"a": math.nan, "b": math.inf, "c": -math.inf, "d": 1.5})
+    p = write_report(r, tmp_path)
+
+    def reject(constant):
+        raise AssertionError(f"report.json contains bare {constant}")
+
+    raw = json.loads(p.read_text(), parse_constant=reject)  # strict JSON: no NaN/Infinity tokens
+    assert raw["metrics"]["a"] == "NaN" and raw["metrics"]["b"] == "Infinity"
+    back = read_report(p)
+    assert math.isnan(back.metrics["a"])
+    assert back.metrics["b"] == math.inf and back.metrics["c"] == -math.inf
+    assert back.metrics["d"] == 1.5
+
+
+def test_write_replaces_existing_report(tmp_path):
+    write_report(Report(stage="s1_rewrite", status="passed", passed=True), tmp_path)
+    write_report(Report(stage="s1_rewrite"), tmp_path)
+    assert read_report(tmp_path / "report.json").status == "running"
