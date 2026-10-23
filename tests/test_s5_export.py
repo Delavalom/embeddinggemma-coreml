@@ -1,0 +1,51 @@
+import base64
+import json
+import re
+from pathlib import Path
+
+import numpy as np
+
+from egcm.paths import HF_REVISION, ROOT
+from stages.s5_swift import export_fixtures as ex
+
+
+def test_sample_indices_are_spread_and_deterministic():
+    idx = ex.sample_indices(3 * 336 * 480, 8192)
+    assert len(idx) == 8192 and idx[0] == 0 and idx[-1] < 3 * 336 * 480
+    assert np.all(np.diff(idx) > 0)
+    assert np.array_equal(idx, ex.sample_indices(3 * 336 * 480, 8192))
+    # fewer values than samples: every value once
+    assert np.array_equal(ex.sample_indices(10, 8192), np.arange(10))
+
+
+def test_pick_images_covers_every_shape_and_both_formats():
+    rows = [{"id": f"i{i:03d}", "file": f"images/x{i}.{'png' if i % 3 == 0 else 'jpg'}",
+             "height": 1000, "width": w} for i, w in enumerate([300, 700, 1000, 1500, 2000] * 6)]
+    picked = ex.pick_images(rows, per_shape=4)
+    assert len(picked) == 20
+    shapes = [ex.shape_of(r) for r in picked]
+    assert all(shapes.count(s) == 4 for s in ("tall", "portrait", "square", "landscape", "wide"))
+    assert {Path(r["file"]).suffix for r in picked} == {".png", ".jpg"}
+    assert picked == ex.pick_images(rows, per_shape=4)
+
+
+def test_image_entry_samples_chw_uint8():
+    u8 = np.arange(48 * 96 * 3, dtype=np.int64).reshape(48, 96, 3).astype(np.uint8)
+    e = ex.image_entry(u8, "square", samples=64)
+    chw = u8.transpose(2, 0, 1).reshape(-1)
+    got = np.frombuffer(base64.b64decode(e["sample_b64"]), np.uint8)
+    assert np.array_equal(got, chw[ex.sample_indices(chw.size, 64)])
+    assert (e["bucket"], e["height"], e["width"]) == ("square", 48, 96)
+
+
+def test_swift_tests_pin_the_same_hf_revision():
+    src = (ROOT / "swift/Tests/EmbeddingGemmaTests/TestSupport.swift").read_text()
+    assert re.search(r'hfRevision = "([0-9a-f]{40})"', src).group(1) == HF_REVISION
+
+
+def test_committed_fixtures_are_small_and_current():
+    d = ROOT / ex.OUT_DIR
+    texts, pixels = json.loads((d / "text_ids.json").read_text()), json.loads((d / "pixels.json").read_text())
+    assert texts["hf_revision"] == pixels["hf_revision"] == HF_REVISION
+    assert len(texts["texts"]) == 200 and len(pixels["images"]) == 20
+    assert sum(p.stat().st_size for p in d.iterdir()) < 2_000_000
