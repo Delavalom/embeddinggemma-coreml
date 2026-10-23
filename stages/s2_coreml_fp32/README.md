@@ -4,7 +4,7 @@ The rewrite converted to Core ML at FP32: every entry point of spec section 7 in
 with shared weights, run on the CPU (`CPU_ONLY`) on s0's inputs and compared with s0's vectors.
 
 Run: `just stage 2` (the `convert` group). Needs fresh passing s0 and s1. About an hour on a busy M1 Pro: 14
-conversions (1 to 3 minutes each), 3 merges, then 200 texts and 400 images on the CPU.
+conversions (0.5 to 2 minutes each), 14 merges (0.5 to 1 minute), then 200 texts and 400 images on the CPU.
 
 ## Input
 
@@ -13,11 +13,14 @@ conversions (1 to 3 minutes each), 3 merges, then 200 texts and 400 images on th
 
 ## What it does
 
-1. For each function in `egcm.functions.FUNCTIONS`: build the torch module (`module_for`), trace it, convert with
-   `egcm.convert.convert` (ML program, iOS18 / macOS15, FP32), save it as a part. Every 2 parts are merged into the
-   growing package with `MultiFunctionDescriptor` + `save_multifunction` and deleted. `save_multifunction` writes a
-   temporary copy of the weights, so disk peaks at about package + 2 parts + temporary weights + new package
-   (≈ 7.5 GB) instead of 14 parts (≈ 16 GB). Free space is checked before every part and merge.
+1. `egcm.parts.build`: each function in `egcm.functions.FUNCTIONS` is converted in its own process
+   (`python -m egcm.parts convert`: loads only the weights it needs, traces, frees the torch module, converts at
+   FP32, saves the part, exits with its memory and temporary files), then merged into the package in its own process
+   (`python -m egcm.parts merge`: package so far + that part, `save_multifunction`, no torch), and the part is
+   deleted. Resumable: `build.json` records the code hash, merged functions and package sha, so a rerun continues
+   where the last one stopped. Guards: a child exits if its physical footprint passes 9 GB or swap grows by more
+   than 6 GB; no step starts if it would leave less than 25 GB free. Measured 2026-10-23: conversion peaks at about
+   2.6 GB (text) / 3.3 GB (image), a merge at about 4 GB; disk peaks at package + part + temporary copy (≈ 4.5 GB).
 2. Checks the I/O contract of every function (`contract_problems`); a mismatch raises.
 3. Compiles the package once and loads each function with `CompiledMLModel(function_name=...)` on `CPU_ONLY`.
 4. Texts: padded with the config's `pad_id` to the smallest of 16/32/64/128, int32 mask. Images: s0's bucket pixels.
@@ -51,6 +54,7 @@ part and the merged package: the merged size ≈ one copy of the weights shows t
   construction (see egcm/model).
 - **The merged package is about the sum of the parts**: deduplication needs bit-identical constants. A per-function
   difference in a shared weight (for example a different fusion) breaks it; compare `sizes_mb`.
-- **Out of disk** (`DiskSpaceError`, or `ENOSPC` in a merge): one FP32 part is about 1.1 GB and the merge needs a
-  temporary copy of the weights. A batch of 5 ran out on 2026-10-23 with about 17 GB free on a shared disk; the
-  batch is now 2. Delete `artifacts/s2_coreml_fp32/parts` and any `*.merging.mlpackage` before rerunning.
+- **Out of memory or disk.** On 2026-10-23 an in-process build (all parts converted in one process, merged 5 at a
+  time) reached 16 GB of memory and ran the shared disk out of space (coremltools' temporary packages stayed until
+  garbage collection). Hence one process per part and per merge. A guard exit says "memory guard"; a disk refusal
+  says how much it needed. Rerunning resumes.

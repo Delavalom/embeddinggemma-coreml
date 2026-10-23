@@ -9,11 +9,12 @@ conversions, a Neural Engine compile per function on first load, 600 predictions
 
 ## What it does
 
-1. **Probe** (`egcm/probe.py`, diagnostic): the FP32 torch rewrite on all 200 texts and 2 images per bucket and
+1. **Probe** (`egcm/probe.py`, diagnostic, in its own process: `stages/s3_coreml_ane/probe_main.py`): the FP32 torch rewrite on all 200 texts and 2 images per bucket and
    budget. Max |x| per site: residual stream after every layer, embeddings, patch embedding, attention and MLP
    outputs, the MLP and PLE inner products, every RMSNorm input and output. Sites above 30,000 are listed as
    `overflow_risk` (FP16 max is 65,504). Full table in `artifacts/s3_coreml_ane/probe.json`.
-2. Converts every function at `ct.precision.FLOAT16` (same contract as s2: int32 ids and mask, fp32 pixels, fp32
+2. Converts every function at `ct.precision.FLOAT16` with `egcm.parts.build` (one process per part and per merge,
+   resumable; see the s2 README) (same contract as s2: int32 ids and mask, fp32 pixels, fp32
    `embedding`; Core ML adds the casts), merges, checks the contract, compiles.
 3. **Neural Engine fraction** (`egcm/placement.py`): `MLComputePlan` of the compiled package with `CPU_AND_NE`; per
    function, the share of ops (those with a device; consts have none) whose preferred device is the Neural Engine.

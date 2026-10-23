@@ -74,7 +74,9 @@ def _need(path: Path, gb: float, what: str) -> None:
 
 def build_package(names: Iterable[str], make: Callable[[str], ct.models.MLModel], out: Path, work: Path,
                   batch: int = 2, log: Callable[[str], None] = print) -> dict:
-    """Convert every function with `make(name)` and merge them into one multifunction package at `out`.
+    """Convert every function with `make(name)` and merge them into one multifunction package at `out`, in this
+    process. For small models (tests). The stages use `egcm.parts.build`, which isolates each part and merge in its
+    own process, because the real model does not fit this Mac's memory when built in one process.
 
     Returns {"parts_mb": {name: size of its part}, "package_mb": size of `out`}."""
     work.mkdir(parents=True, exist_ok=True)

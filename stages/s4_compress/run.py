@@ -7,24 +7,24 @@ See stages/s4_compress/README.md.
 
 from __future__ import annotations
 
-import gc
 import json
 import time
 
 import coremltools as ct
 import numpy as np
 
+from egcm import parts
 from egcm.compress import RECIPES
-from egcm.convert import compile_package, contract_problems, convert, disk_free_gb, size_mb
+from egcm.config import HF_SNAPSHOT, load
+from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
 from egcm.evaluate import Package, latency_ms, run_images, run_texts, text_feed
-from egcm.functions import FUNCTIONS, load_towers, module_for
+from egcm.functions import FUNCTIONS
 from egcm.gates import gates as stage_gates
 from egcm.paths import stage_dir
 from egcm.placement import ane_placement
 from egcm.report import Report
 from egcm.stage import run_stage
 from stages.s4_compress import ranking
-from stages.s4_compress.build import build_variants
 
 STAGE = "s4_compress"
 UNITS = ct.ComputeUnit.CPU_AND_NE  # the shipping configuration
@@ -73,16 +73,10 @@ def fill(report: Report) -> None:
     gates = stage_gates(STAGE)
     out = stage_dir(STAGE)
     log(f"disk free {disk_free_gb(out):.1f} GB")
-    held = {"towers": load_towers()}
-
-    def make_fp16(name: str):
-        module, example = module_for(name, held["towers"])
-        return convert(name, module, example, ct.precision.FLOAT16)
-
-    sizes = build_variants(FUNCTIONS, make_fp16, {r: f for r, (_, f) in RECIPES.items()}, out, log=log)
-    pad_id = held.pop("towers").pad_id
-    gc.collect()
-    report.details["sizes_mb"] = sizes
+    built = parts.build(STAGE, FUNCTIONS, "fp16", out, recipes=list(RECIPES), log=log)
+    sizes = {r: {"package_mb": v["mb"]} for r, v in built["packages"].items()}
+    pad_id = load(HF_SNAPSHOT)[0].pad_id
+    report.details["build"] = built
 
     variants: dict[str, dict] = {}
     winner = None

@@ -7,60 +7,28 @@ probe of the FP32 rewrite (probe.json) and latency. See stages/s3_coreml_ane/REA
 
 from __future__ import annotations
 
-import gc
-import json
 import os
 import shutil
 import time
 
 import coremltools as ct
 import numpy as np
-import torch
 
-from egcm import probe
-from egcm.buckets import BUCKETS
-from egcm.convert import build_package, compile_package, contract_problems, convert, disk_free_gb, size_mb
+from egcm import parts, probe
+from egcm.config import HF_SNAPSHOT, load
+from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
 from egcm.evaluate import Package, latency_ms, run_images, run_texts, text_feed
-from egcm.fixtures import S0_DIR, load_bucket_pixels
-from egcm.functions import FUNCTIONS, TEXT_FUNCTIONS, Towers, load_towers, module_for
+from egcm.functions import FUNCTIONS
 from egcm.paths import stage_dir
 from egcm.placement import ane_placement
 from egcm.report import Report
 from egcm.stage import run_stage
+from stages.s3_coreml_ane import probe_main
 
 STAGE = "s3_coreml_ane"
 UNITS = ct.ComputeUnit.CPU_AND_NE
-PROBE_IMAGES_PER_BUCKET = 2  # the probe is diagnostic; all 200 texts, 2 images per bucket and budget
 KEEP = os.environ.get("EGCM_KEEP_PACKAGES") == "1"
 LATENCY = ("embed_text_16", "embed_image_70_square")
-
-
-@torch.inference_mode()
-def run_probe(t: Towers, log) -> dict:
-    stores = []
-    with np.load(S0_DIR / "texts.npz") as z:
-        feeds = [text_feed(z[f"ids_{k}"], t.pad_id) for k in z["order"]]
-    for fn in TEXT_FUNCTIONS:
-        group = [f for name, f in feeds if name == fn]
-        if not group:
-            continue
-        module, _ = module_for(fn, t)
-        with probe.probe(module, "text/") as s:
-            for f in group:
-                module(torch.from_numpy(f["input_ids"]), torch.from_numpy(f["attention_mask"]))
-        stores.append(s)
-    for b in BUCKETS:
-        with np.load(S0_DIR / f"images_{b.budget}.npz") as z:
-            ids = [str(o) for o, n in zip(z["order"], z["bucket"], strict=True) if str(n) == b.name]
-        if not ids:
-            continue
-        module, _ = module_for(b.function_name, t)
-        with probe.probe(module, "image/") as s:
-            for i in ids[:PROBE_IMAGES_PER_BUCKET]:
-                module(torch.from_numpy(load_bucket_pixels(b.budget, i)))
-        stores.append(s)
-        log(f"probe {b.function_name}")
-    return probe.report(stores)
 
 
 def fill(report: Report) -> None:
@@ -72,21 +40,13 @@ def fill(report: Report) -> None:
     out = stage_dir(STAGE)
     pkg, compiled = out / "EmbeddingGemma2.mlpackage", out / "EmbeddingGemma2.mlmodelc"
     log(f"disk free {disk_free_gb(out):.1f} GB")
-    held = {"towers": load_towers()}
-
-    pr = run_probe(held["towers"], log)
-    (out / "probe.json").write_text(json.dumps(pr, indent=1) + "\n")
+    pr = probe_main.run_in_subprocess(out / "probe.json")  # the FP32 torch model never shares a process
     report.details["probe"] = {k: pr[k] for k in ("sites", "max_by_kind", "top", "overflow_risk")}
     log(f"probe: {pr['sites']} sites, {len(pr['overflow_risk'])} above {probe.FP16_RISK:.0f}, "
         f"largest {pr['top'][0]}")
 
-    def make(name: str):
-        module, example = module_for(name, held["towers"])
-        return convert(name, module, example, ct.precision.FLOAT16)
-
-    sizes = build_package(FUNCTIONS, make, pkg, out / "parts", log=log)
-    pad_id = held.pop("towers").pad_id
-    gc.collect()
+    sizes = parts.build(STAGE, FUNCTIONS, "fp16", out, log=log)
+    pad_id = load(HF_SNAPSHOT)[0].pad_id
     report.details["sizes_mb"] = sizes
     report.details["contract_problems"] = problems = contract_problems(pkg, FUNCTIONS)
     if problems:
