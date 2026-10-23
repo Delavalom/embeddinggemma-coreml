@@ -14,9 +14,10 @@ conversions (1 to 3 minutes each), 3 merges, then 200 texts and 400 images on th
 ## What it does
 
 1. For each function in `egcm.functions.FUNCTIONS`: build the torch module (`module_for`), trace it, convert with
-   `egcm.convert.convert` (ML program, iOS18 / macOS15, FP32), save it as a part. Every 5 parts are merged into the
-   growing package with `MultiFunctionDescriptor` + `save_multifunction` and deleted, so disk peaks at about
-   package + 5 parts + package (≈ 9 GB) instead of 14 parts (≈ 15 GB).
+   `egcm.convert.convert` (ML program, iOS18 / macOS15, FP32), save it as a part. Every 2 parts are merged into the
+   growing package with `MultiFunctionDescriptor` + `save_multifunction` and deleted. `save_multifunction` writes a
+   temporary copy of the weights, so disk peaks at about package + 2 parts + temporary weights + new package
+   (≈ 7.5 GB) instead of 14 parts (≈ 16 GB). Free space is checked before every part and merge.
 2. Checks the I/O contract of every function (`contract_problems`); a mismatch raises.
 3. Compiles the package once and loads each function with `CompiledMLModel(function_name=...)` on `CPU_ONLY`.
 4. Texts: padded with the config's `pad_id` to the smallest of 16/32/64/128, int32 mask. Images: s0's bucket pixels.
@@ -50,4 +51,6 @@ part and the merged package: the merged size ≈ one copy of the weights shows t
   construction (see egcm/model).
 - **The merged package is about the sum of the parts**: deduplication needs bit-identical constants. A per-function
   difference in a shared weight (for example a different fusion) breaks it; compare `sizes_mb`.
-- **Out of disk**: one FP32 part is about 1.1 GB. `disk free` is logged at the start and after the merge.
+- **Out of disk** (`DiskSpaceError`, or `ENOSPC` in a merge): one FP32 part is about 1.1 GB and the merge needs a
+  temporary copy of the weights. A batch of 5 ran out on 2026-10-23 with about 17 GB free on a shared disk; the
+  batch is now 2. Delete `artifacts/s2_coreml_fp32/parts` and any `*.merging.mlpackage` before rerunning.

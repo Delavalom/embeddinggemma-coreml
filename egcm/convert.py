@@ -3,7 +3,9 @@
 Each function is traced and converted on its own (iOS18 / macOS15 ML program) and saved as a part. Parts are merged
 with `MultiFunctionDescriptor` + `save_multifunction`, which deduplicates constants with identical values, so the
 towers' weights (identical in every part) are stored once. Disk is bounded by merging every `batch` parts into the
-growing package and deleting them: peak = package + `batch` parts + the new package.
+growing package and deleting them. `save_multifunction` also writes a temporary copy of the weights, so the peak is
+about package + `batch` parts + temporary weights + new package (FP32, batch 2: about 7.5 GB). Before every part and
+every merge the free space is checked against that estimate (`DiskSpaceError` instead of a failed write).
 """
 
 from __future__ import annotations
@@ -20,6 +22,11 @@ import torch
 from egcm.functions import DEFAULT_FUNCTION, EMBEDDING_DIM, TEXT_FUNCTIONS, bucket_for, text_length
 
 TARGET = ct.target.iOS18
+MARGIN_GB = 2.0  # kept free beyond the estimate (other processes share the disk)
+
+
+class DiskSpaceError(RuntimeError):
+    """Not enough free disk for the next conversion step."""
 
 
 def input_specs(name: str) -> list[ct.TensorType]:
@@ -59,8 +66,14 @@ def _merge(sources: list[tuple[Path, str]], out: Path) -> None:
     tmp.rename(out)
 
 
+def _need(path: Path, gb: float, what: str) -> None:
+    free = disk_free_gb(path)
+    if free < gb + MARGIN_GB:
+        raise DiskSpaceError(f"{what} needs about {gb:.1f} GB (+{MARGIN_GB} GB margin); {free:.1f} GB free")
+
+
 def build_package(names: Iterable[str], make: Callable[[str], ct.models.MLModel], out: Path, work: Path,
-                  batch: int = 5, log: Callable[[str], None] = print) -> dict:
+                  batch: int = 2, log: Callable[[str], None] = print) -> dict:
     """Convert every function with `make(name)` and merge them into one multifunction package at `out`.
 
     Returns {"parts_mb": {name: size of its part}, "package_mb": size of `out`}."""
@@ -71,6 +84,8 @@ def build_package(names: Iterable[str], make: Callable[[str], ct.models.MLModel]
     parts_mb: dict[str, float] = {}
 
     def flush() -> None:
+        pkg_gb = size_mb(out) / 1e3 if out.exists() else 0.0
+        _need(work, 2 * (pkg_gb + sum(size_mb(p) for p in pending) / 1e3), "merge")
         sources = [(out, fn) for fn in done] + [(p, "main") for p in pending]
         _merge(sources, out)
         done.extend(p.stem for p in pending)
@@ -82,6 +97,8 @@ def build_package(names: Iterable[str], make: Callable[[str], ct.models.MLModel]
     for name in names:
         part = work / f"{name}.mlpackage"
         shutil.rmtree(part, ignore_errors=True)
+        last = max(parts_mb.values(), default=0.0) / 1e3
+        _need(work, 2 * last, f"converting {name}")  # the part plus coremltools' temporary copy
         m = make(name)
         m.save(str(part))
         del m
