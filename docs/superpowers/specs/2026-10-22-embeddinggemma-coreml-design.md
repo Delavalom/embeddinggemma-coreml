@@ -179,20 +179,23 @@ public actor EmbeddingGemma {
   public func embed(text: String, task: EmbeddingTask = .document) async throws -> [Float]
   public nonisolated var modelRevision: String { get }
 }
-public struct VectorIndex: Sendable {   // EmbeddingIndex module
-  public init(url: URL, dimensions: Int, modelRevision: String) throws          // throws .revisionMismatch on stale files
-  public mutating func upsert(id: String, vector: [Float]) throws
-  public mutating func remove(id: String) throws
+/// EmbeddingIndex module. A reference type on purpose, and not Sendable: own it from one actor.
+public final class VectorIndex {
+  public init(url: URL, dimensions: Int, modelRevision: String) throws          // .revisionMismatch on stale files, .invalidDimensions unless 1...65_535
+  public func reserveCapacity(_ n: Int)
+  public func upsert(id: String, vector: [Float]) throws                        // stored rounded to FP16
+  public func remove(id: String) throws
   public func search(_ query: [Float], k: Int, filter: ((String) -> Bool)? = nil) -> [(id: String, score: Float)]
   public func vector(for id: String) -> [Float]?
-  public func save() throws
+  public func save() throws                                                     // streamed to a temp file, then renamed
 }
 ```
 
+- **Why a class:** at 50k × 256 the index is 51 MB; a `Sendable` struct would copy it silently on the first mutation of any shared copy. The app wraps the one instance in an actor.
 - **Tokenizer:** `swift-transformers` `Tokenizers`, loaded from the bundled `tokenizer.json`.
 - **`.auto` budget:** 280 on A17 Pro and newer, 70 otherwise. Mapping lives in `DeviceTier.swift`.
 - **`defaultRepo`:** a constant set from `HF_REPO` in the `justfile`. The Hugging Face account is confirmed at s7, before the first upload.
-- **Index file:** header (magic, version, dims, modelRevision, count) + FP16 vectors + an id table. Memory-mapped; search uses `vDSP` / `BLAS` dot products. 50k × 256 must search in < 20 ms on an iPhone 12 (unit benchmark on macOS as a proxy, verified in s6).
+- **Index file (version 2):** little-endian header (magic, version, dims, count, modelRevision), padded so the FP16 block starts 16-byte aligned, then the FP16 vectors, then an id table (JSON). Memory-mapped on load and widened straight into the single in-memory `[Float]` buffer; saved by streaming chunks to a temp file and renaming; search uses `vDSP` / `BLAS` dot products. 50k × 256 must search in < 20 ms on an iPhone 12 (unit benchmark on macOS as a proxy, verified in s6).
 - **ModelStore:** resumable `URLSession` background download into Application Support/EmbeddingGemma/<revision>/. SHA-256 is checked against `checksums.json` from the same HF revision. The previous revision is kept until the new one verifies.
 - **Errors:** `EmbeddingGemmaError` with `.downloadFailed(underlying)`, `.checksumMismatch(file)`, `.unsupportedOS`, `.modelLoadFailed(underlying)`, `.revisionMismatch(expected, found)`, `.invalidImage`.
 - **Tests:** tokenizer parity (fixtures), preprocessing parity (fixtures), end-to-end parity on macOS against s4 artifacts (skipped with a clear message if artifacts are missing), index round-trip, revision mismatch, top-k correctness against brute force.
