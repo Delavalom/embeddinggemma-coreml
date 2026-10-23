@@ -35,7 +35,7 @@
   - `q_norm`/`k_norm` RMSNorms with weights; `v_norm` RMSNorm without weights. Norms are applied per head *before* RoPE.
   - RoPE uses `rotate_half` on the full head_dim.
 - **Layer types:** sliding layers have head_dim 256, 2 KV heads, θ 1e4. Full layers (5, 11, 17, 23) have head_dim 512, 1 KV head, θ 1e6.
-  - The sliding window is 512. Every sequence we build is ≤ 290 tokens, so sliding layers attend to everything: **one mask for all layers**.
+  - The sliding window is 512. Every sequence we build is ≤ `egcm.buckets.MAX_SEQ` = 284 tokens (280 soft tokens + 4 special), so sliding layers attend to everything: **one mask for all layers**. `config.load()` rejects a config whose `sliding_window` is below `MAX_SEQ`.
 - **Output:** `norm(h)` → `embedding_projection` Linear(512→768) per token → mean over valid tokens (sentence-transformers `include_prompt: true`) → L2 normalize.
 - **RMSNorm:** `x * (mean(x²) + eps)^-0.5 * weight` in FP32. **Gemma4 weights are used as-is** (no `1 + w`): `weight` is initialized to ones and multiplied directly.
 
@@ -608,6 +608,8 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 
 ### Task 7: Config and the scale-safe RMSNorm
 
+> **Implemented, then amended after review.** The code below is the original draft; `egcm/config.py` and `egcm/model/norm.py` are authoritative. Changes: `eps/s²` is floored at `2**-24` (`eps_eff`) so fp16 never sees eps = 0; `config.load()` resolves `per_layer_config` per layer and rejects configs the rewrite does not implement (non-default rope, `standardize`, clipped linears, `attention_bias`, `sliding_window < buckets.MAX_SEQ`).
+
 **Files:** create `egcm/config.py`, `egcm/model/norm.py`, `tests/test_norm.py`.
 
 - [ ] **Step 1: Write the failing test.**
@@ -781,6 +783,8 @@ def apply_rope_cf(x, cos, sin, halves: int):
 
 ### Task 9: ANE attention
 
+> **Implemented, then amended after review.** The code below is the original draft; `egcm/model/attention.py`, `egcm/model/masks.py`, `tests/test_attention.py` and `tests/upstream.py` are authoritative. The main change: the attention mask is additive and **key-major, `(1, S, 1, 1)`**, built by `egcm.model.masks.key_mask(valid)` from a `(1, S)` 0/1 tensor (or `None` for no padding). `AttentionCF` adds it to the `(1, S_k, 1, S_q)` logits directly, with no per-head transpose.
+
 **Files:** create `egcm/model/attention.py`, `tests/test_attention.py`.
 
 - [ ] **Step 1: Write the failing test.** It checks against a direct `(S, H, D)` implementation of the upstream `eager_attention_forward` with `scaling=1.0`, GQA `repeat_kv`, q/k RMSNorm with weights, v RMSNorm without weight, RoPE after the norm, and an additive mask (0 or −1e4) on padded keys.
@@ -906,7 +910,7 @@ class Layer(nn.Module):
         return h * self.layer_scalar
 
 class TextTower(nn.Module):
-    """Input: inputs_embeds (1, C, 1, S) already scaled by sqrt(C); additive key mask (1,1,1,S)."""
+    """Input: inputs_embeds (1, C, 1, S) already scaled by sqrt(C); additive key-major mask (1, S, 1, 1) from key_mask."""
     def __init__(self, cfg: TextCfg, seq_len: int):
         super().__init__()
         self.cfg = cfg
@@ -936,6 +940,7 @@ class TextTower(nn.Module):
 # egcm/model/embedder.py
 import torch
 from torch import nn
+from egcm.model.masks import key_mask
 
 def masked_mean_l2(tokens, valid):  # tokens (1, D, 1, S); valid (1,1,1,S) in {0,1}
     pooled = (tokens * valid).sum(-1, keepdim=True) / valid.sum(-1, keepdim=True)
@@ -949,8 +954,8 @@ class TextEmbedder(nn.Module):
         self.register_buffer("table", table)   # (V, C) already * sqrt(C)
     def forward(self, input_ids, attention_mask):  # (1, S) int32, (1, S) float 0/1
         emb = self.table[input_ids[0].long()].T.unsqueeze(0).unsqueeze(2)   # (1, C, 1, S)
-        valid = attention_mask.view(1, 1, 1, -1)
-        mask = (1.0 - valid) * -1e4
+        valid = attention_mask.view(1, 1, 1, -1)                            # pooling weights over S
+        mask = key_mask(attention_mask)                                     # (1, S, 1, 1) additive
         return masked_mean_l2(self.tower(emb, mask), valid)
 ```
 
@@ -971,6 +976,7 @@ from egcm.config import VisionCfg
 from egcm.buckets import Bucket
 from egcm.model.norm import RMSNormCF
 from egcm.model.attention import AttentionCF, conv1x1
+from egcm.model.masks import key_mask
 from egcm.model.rope import rope_2d
 from egcm.model.text import MLP
 
@@ -996,7 +1002,7 @@ class VisionTower(nn.Module):
         self.register_buffer("pos", torch.zeros(1, cfg.hidden, Hp, Wp))       # filled by weights.py
         c, s = rope_2d(Hp, Wp, cfg.head_dim, cfg.theta)
         self.register_buffer("cos", c); self.register_buffer("sin", s)
-        self.register_buffer("mask", torch.zeros(1, 1, 1, Hp * Wp))          # no padding inside a bucket
+        self.register_buffer("mask", key_mask(torch.ones(1, Hp * Wp)))        # (1, S, 1, 1), all 0: no padding in a bucket (None is equivalent)
         self.layers = nn.ModuleList([VLayer(cfg) for _ in range(cfg.layers)])
         self.mm_norm = RMSNormCF(cfg.hidden, cfg.eps, with_scale=False)       # sqrt(768) pooler scale dropped: scale-invariant
         self.mm_proj = conv1x1(cfg.hidden, text_hidden)
@@ -1025,7 +1031,7 @@ class ImageEmbedder(nn.Module):
         emb = torch.cat([self.prefix, soft, self.suffix], dim=-1)
         S = emb.shape[-1]
         valid = torch.ones(1, 1, 1, S)
-        return masked_mean_l2(self.tower(emb, torch.zeros(1, 1, 1, S)), valid)
+        return masked_mean_l2(self.tower(emb, key_mask(torch.ones(1, S))), valid)
 ```
 
 The text tower's RoPE buffers are sized to the sequence length, so each image bucket gets its own `TextTower(seq_len = P + tokens + Q)`. The weights are shared through the multifunction merge in Task 14.
