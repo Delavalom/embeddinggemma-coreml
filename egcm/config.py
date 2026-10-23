@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from egcm.buckets import MAX_SEQ
+from egcm.paths import ARTIFACTS, HF_REPO, HF_REVISION
+
+# Where s0's snapshot_download(cache_dir=artifacts/hf) puts HF_REVISION (config.json, safetensors, tokenizer).
+# Kept here, not in paths.py, so rewrite-only additions don't make s0 stale.
+HF_SNAPSHOT = ARTIFACTS / "hf" / f"models--{HF_REPO.replace('/', '--')}" / "snapshots" / HF_REVISION
 
 LAYER_TYPES = ("sliding_attention", "full_attention")
 

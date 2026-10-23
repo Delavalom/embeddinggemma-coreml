@@ -10,8 +10,6 @@ HF_REPO = "google/embeddinggemma-2"
 HF_REVISION = "914f7f89142e33e77833254d9c9b90c3cef7303b"
 # sha256 of model.safetensors at HF_REVISION (its Git LFS oid). s0 checks the downloaded file against it.
 HF_MODEL_SHA256 = "197a32965d4b1105faf060417baa899e193fb73cd401f42ec9295234d5553d79"
-# Where s0's snapshot_download(cache_dir=artifacts/hf) puts that revision (config.json, safetensors, tokenizer).
-HF_SNAPSHOT = ARTIFACTS / "hf" / f"models--{HF_REPO.replace('/', '--')}" / "snapshots" / HF_REVISION
 
 # Stage names in pipeline order. The justfile has the same list; tests/test_scripts.py keeps them in sync.
 STAGES = (

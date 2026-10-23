@@ -4,7 +4,7 @@ import pytest
 
 from egcm import config
 from egcm.buckets import MAX_SEQ
-from egcm.paths import HF_SNAPSHOT
+from egcm.config import HF_SNAPSHOT
 
 FULL = (5, 11, 17, 23)
 
