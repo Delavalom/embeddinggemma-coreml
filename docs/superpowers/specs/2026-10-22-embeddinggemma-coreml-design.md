@@ -81,7 +81,7 @@ embeddinggemma-coreml/
 ### Rules in AGENTS.md
 
 1. Start every session with `just status`.
-2. A stage only passes if its `artifacts/sN/report.json` has `"pass": true` and was produced by `just stage N` at the current git SHA. The report records `git_sha`, `inputs_sha256`, `gate_values`, `metrics`, `pass`, and `started_at` / `finished_at`.
+2. A stage only passes if its `artifacts/sN/report.json` has `"passed": true` and `"status": "passed"`, was produced by `just stage N`, and is not stale. The report records `git_sha`, `git_dirty`, `code_hash`, `inputs_sha256`, `gate_values`, `metrics`, `passed`, `status` (`running | passed | failed | error`), and `started_at` / `finished_at`. A report is stale when its `code_hash` or `inputs_sha256` no longer matches the current code and upstream reports (definitions in AGENTS.md).
 3. Changing `gates.toml` requires a new `docs/decisions/ADR-*.md` in the same commit. CI enforces this with `scripts/check_gates_adr.py`.
 4. Fixtures only come from `just stage 0`. CI checks `fixtures/MANIFEST.sha256`.
 5. No weights or `.mlpackage` files in git. The `.gitignore` plus a CI size check (no file over 5 MB) enforce this.
@@ -102,7 +102,7 @@ just publish           # s7. Refuses to run unless s0–s6 pass AND --confirm is
 
 ## 5. Stages and gates
 
-All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate is on the **minimum**, not the mean. Ranking metrics use the 200 text queries against the 200 images.
+All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate is on the **minimum**, not the mean. Ranking metrics use the 120 app queries against the 200 images.
 
 | Stage | What it does | Gate |
 |---|---|---|
@@ -110,7 +110,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s1_rewrite** | Our PyTorch rewrite, FP32, same inputs | min cosine ≥ 0.9999 (text and image). Strict weight load |
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | min cosine ≥ 0.995, and ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
-| **s4_compress** | int8 weights first, then 4-bit palettization. Keep the smallest variant that passes | min cosine ≥ 0.99, recall@10 ≥ 0.95, Spearman ρ of the top-50 ≥ 0.9, full download ≤ 300 MB |
+| **s4_compress** | int8 weights first, then 4-bit palettization. Keep the smallest variant that passes | min cosine ≥ 0.99, recall@10 ≥ 0.95, 5th-percentile (over the 120 app queries) Spearman ρ of the top-50 ≥ 0.9, ranking the reference top-50 inside the new full ranking, full download ≤ 300 MB |
 | **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255; end-to-end min cosine ≥ 0.99 against s0 |
 | **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target, not gated |
 | **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
@@ -138,11 +138,9 @@ All entry points live in one multifunction `.mlpackage` with shared weights:
 | Function | Input | Output |
 |---|---|---|
 | `embed_text_{16,32,64,128}` | `input_ids` int32 `[1,L]`, `attention_mask` `[1,L]` | `embedding` fp `[1,768]`, L2-normalized |
-| `embed_image_{70,280}_{portrait,landscape,square}` | `pixels` `[1,3,H,W]`, 0–1 | `embedding` `[1,768]` |
+| `embed_image_{70,280}_{tall,portrait,square,landscape,wide}` | `pixels` `[1,3,H,W]`, 0–1 | `embedding` `[1,768]` |
 
-**Image buckets.** The reference resize keeps aspect ratio, so shapes vary. We fix three aspect buckets per budget, each with a patch grid whose sides are divisible by 3 so 3×3 pooling works:
-- budget 70: portrait 30×21 patches (480×336 px), landscape 21×30, near-square 24×27 patches (8×9 = 72 soft tokens), finalized in s2 against what the reference processor accepts;
-- budget 280: double each side.
+**Image buckets.** The reference resize keeps aspect ratio, so shapes vary. We fix five aspect buckets per budget (tall, portrait, square, landscape, wide), each a fixed point of the reference resize with sides divisible by 48 so 3×3 pooling works (480×336 portrait at budget 70, 960×672 at 280, and so on). The full table, the aspect-ratio thresholds, and the stretch each bucket costs are in `docs/decisions/ADR-0002-image-buckets.md`.
 
 Swift resizes each photo into the closest bucket. s4's recall gate measures the cost of this against the reference's exact-aspect vectors. If recall fails because of bucketing, we add buckets (ADR) before relaxing anything.
 
