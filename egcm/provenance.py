@@ -49,7 +49,8 @@ _REWRITE = ("egcm/model", "egcm/config.py", "egcm/weights.py")
 _COMPARE = ("egcm/buckets.py", "egcm/metrics.py", "egcm/fixtures.py", "egcm/paths.py")
 STAGE_CODE: dict[str, tuple[str, ...]] = {
     "s0_reference": ("stages/s0_reference", "egcm/buckets.py", "egcm/fixtures.py", "egcm/paths.py", *_LOCK),
-    "s1_rewrite": ("stages/s1_rewrite", *_REWRITE, *_COMPARE, *_LOCK),
+    # s1 also checks s0's recorded patch positions with s0's own pixels.py
+    "s1_rewrite": ("stages/s1_rewrite", "stages/s0_reference/pixels.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s2_coreml_fp32": ("stages/s2_coreml_fp32", "egcm/convert.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s3_coreml_ane": ("stages/s3_coreml_ane", "egcm/convert.py", "egcm/probe.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s4_compress": ("stages/s4_compress", "egcm/compress.py", "egcm/convert.py", *_REWRITE, *_COMPARE, *_LOCK),

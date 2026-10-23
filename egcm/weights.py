@@ -1,9 +1,10 @@
 """google/embeddinggemma-2 safetensors -> the rewrite's modules, strict.
 
 Every Hugging Face key the rewrite uses maps to exactly one destination by one rule (`RULES`); linear weights become
-1x1 conv weights `(out, in) -> (out, in, 1, 1)`, and the patch projection a 16x16 conv weight. The modules are created on the meta device and filled with
-`load_state_dict(strict=True, assign=True)`, so a missing or extra key raises and no weight is held twice. Keys
-`keys.json` lists that no rule uses must all belong to the audio tower (tests/test_weights_map.py).
+1x1 conv weights `(out, in) -> (out, in, 1, 1)`, and the patch projection a 16x16 conv weight. The modules are
+created on the meta device and filled with `load_state_dict(strict=True, assign=True)`, so a missing or extra key
+raises and no weight is held twice. Keys `keys.json` lists that no rule uses must all belong to the audio tower
+(tests/test_weights_map.py).
 
 Load-time check: with `scaling = 1.0`, q and k leave their RMSNorms with rms 1 per head before the weights, so
 `|q.k| <= head_dim * max|q_norm.w| * max|k_norm.w|`. `check_logit_bound` rejects a checkpoint above `LOGIT_BOUND`,

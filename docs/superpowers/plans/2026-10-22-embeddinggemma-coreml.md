@@ -78,7 +78,7 @@
 - **Layout:** hidden states are `(1, C, 1, S)`, and every Linear is a `Conv2d(1×1)`.
 - **RMSNorm:** reduces over the channel dim (1), scaled per token: `m = max(max_c|x|, 2⁻⁶)`, `xs = x/m`, `y = xs · rsqrt(mean(xs²) + (sqrt(eps)/m)²)`. Exact in maths; `|xs| ≤ 1` so `x²` never overflows FP16, and `sqrt(eps)` is a normal FP16 value where `eps` (subnormal) would be flushed to 0 by the Neural Engine. No per-norm constant and no probe-driven tuning.
 - **Attention:** per head, using `einsum('bchq,bkhc->bkhq')`; no 5-D tensors. Softmax over dim 1.
-- **Vision patchify:** `Conv2d(3→768, k=16, s=16)`, with the weight built from `input_proj.weight.view(768,16,16,3).permute(0,3,1,2) * 2` and the bias set to `-input_proj.weight.sum(1)`. This folds in `2(x−0.5)`.
+- **Vision patchify:** `(x − 0.5) · 2` on the pixels, then `Conv2d(3→768, k=16, s=16, bias=False)` with the weight `input_proj.weight.view(768,16,16,3).permute(0,3,1,2)`. The rescale is deliberately *not* folded into the conv (weight × 2, bias `−input_proj.weight.sum(1)`): that is exact in maths, but the conv then cancels a large bias, which measured 5.6e-6 relative error at the patch embedding and 4.9e-5 at vision layer 15 in FP32 against s0's `debug.npz` (unfolded: 1.5e-6 and 3.4e-5) and would lose more in FP16. The cost is one elementwise op on the 3-channel input.
 - **Vision position embeddings and every RoPE cos/sin:** precomputed per bucket and stored as constants.
 - **Vision pooling:** `avg_pool2d(k=3, s=3)` on the `(1,768,Hp,Wp)` grid → `(1,768,1,T)`.
 
@@ -112,7 +112,7 @@ embeddinggemma-coreml/
   egcm/probe.py                         # activation max-abs probe
   egcm/fixtures.py                      # fixture manifest helpers
   stages/s0_reference/{README.md,run.py,build_fixtures.py}
-  stages/s1_rewrite/{README.md,run.py}
+  stages/s1_rewrite/{README.md,run.py,parity.py,debug.py}
   stages/s2_coreml_fp32/{README.md,run.py}
   stages/s3_coreml_ane/{README.md,run.py}
   stages/s4_compress/{README.md,run.py}
@@ -123,6 +123,7 @@ embeddinggemma-coreml/
   tests/conftest.py  tests/test_report.py  tests/test_gates.py  tests/test_provenance.py  tests/test_stage.py
   tests/test_scripts.py  tests/test_metrics.py  tests/test_buckets.py  tests/test_norm.py
   tests/test_rope.py  tests/test_weights_map.py  tests/test_gates_adr.py
+  tests/upstream.py  tests/upstream_towers.py  tests/tiny.py  tests/test_towers.py  tests/test_s1_parity.py
   fixtures/images/*.{jpg,png}  fixtures/images.jsonl  fixtures/texts.jsonl  fixtures/MANIFEST.sha256
   docs/decisions/ADR-0001-ane-rewrite.md  docs/decisions/ADR-0002-image-buckets.md  docs/decisions/ADR-0003-initial-gate-set.md  docs/RESULTS.md
   swift/Package.swift
@@ -871,6 +872,8 @@ class AttentionCF(nn.Module):
 
 ### Task 10: Text tower and embedder
 
+> **Implemented, then amended.** The code below is the original draft; `egcm/model/text.py` and `egcm/model/embedder.py` are authoritative. Changes: `TextTower(cfg)` holds the weights only; RoPE depends on the sequence length, so `forward(emb, mask, rope)` takes the tables, and each embedder (one fixed length) owns them via `rope_tables(cfg, seq_len)`. One tower therefore serves every text length and image bucket without copying weights. `TextEmbedder(tower, table, seq_len)` uses `F.embedding`; `TEXT_LENGTHS = (16, 32, 64, 128)` lives in `embedder.py`. Tested against copies of the upstream towers (`tests/upstream_towers.py`, `tests/tiny.py`, `tests/test_towers.py`) on a tiny model loaded through the real mapping, and converted whole in `tests/test_convertible.py`.
+
 **Files:** create `egcm/model/text.py`, part of `egcm/model/embedder.py`.
 
 - [ ] **Step 1: Implement `TextTower`** (verified in Task 12 against s0 `debug.npz` and the vectors; no separate synthetic test).
@@ -965,6 +968,8 @@ class TextEmbedder(nn.Module):
 
 ### Task 11: Vision tower and image embedder
 
+> **Implemented, then amended.** The code below is the original draft; `egcm/model/vision.py` and `egcm/model/embedder.py` are authoritative. Changes: `VisionEncoder(cfg, text_hidden)` holds the weights (patch conv, `pos_table`, layers, `mm_proj`) and `VisionTower(encoder, bucket)` adds one bucket's constants (position embeddings read from `pos_table`, so build it after loading; RoPE tables); every size, including the token count, is fixed at construction. The rescale is applied as `(x − 0.5) · 2`, not folded (see "Neural Engine rewrite rules"). `ImageEmbedder` computes `seq_len = P + tokens + Q` at construction (never `emb.shape[-1]`), passes no mask (a bucket has no padding) and pools with a plain mean.
+
 **Files:** create `egcm/model/vision.py`, append to `egcm/model/embedder.py`.
 
 - [ ] **Step 1: Implement.**
@@ -1042,6 +1047,8 @@ The text tower's RoPE buffers are sized to the sequence length, so each image bu
 
 ### Task 12: Weight mapping and s1 parity
 
+> **Implemented, then amended.** `egcm/weights.py`, `stages/s1_rewrite/` and their tests are authoritative. Changes: `build_text_tower(cfg, sd)` takes no `seq_len` (see Task 10), `build_vision_encoder(vcfg, sd, text_hidden)` + `build_vision_tower(encoder, bucket)` replace `build_vision_tower(vcfg, sd, bucket, text_hidden)`, and `text_table(sd, hidden)` takes the hidden size. Towers are built on the meta device and filled with `load_state_dict(strict=True, assign=True)`. `load_hf` reads only the keys a rule uses. s0 stores the bucket image as uint8 (not patches), so step 4 became: read pixels with `load_bucket_pixels`, and check each image's recorded `input_ids` against the bucket layout and its positions against the row-major grid. The table below matches `keys.json` (no `model.` prefix in this checkpoint).
+
 **Files:** create `egcm/weights.py`, `tests/test_weights_map.py`, `stages/s1_rewrite/run.py`, `stages/s1_rewrite/README.md`.
 
 - [ ] **Step 1: Write the failing test** (uses `artifacts/s0_reference/keys.json`; skipped when it's absent).
@@ -1069,32 +1076,35 @@ def test_every_needed_key_mapped_and_no_audio():
   - `build_vision_tower(vcfg, sd, bucket, text_hidden) -> VisionTower`.
   - `text_table(sd) -> Tensor` (embed weight × hidden**0.5).
 
-  The mapping is explicit, one line per parameter family, with linear weights reshaped `(out,in) → (out,in,1,1)`. The actual prefixes come from `keys.json`. Expected shape:
+  The mapping is explicit, one line per parameter family (`egcm.weights.RULES`), with linear weights reshaped `(out,in) → (out,in,1,1)`. Checked against `keys.json` (1,376 keys; every key without a rule is `audio_tower.*` or `embed_audio.*`). Destinations are `TextTower` (text) and `VisionEncoder` (vision) state-dict names:
 
   ```
-  language_model.embed_tokens.weight                         -> table (× sqrt(512))
-  language_model.ple.per_layer_model_projection.weight       -> ple_proj
+  language_model.embed_tokens.weight (262144,512)            -> table = W × sqrt(512) (text_table; not in the tower)
+  language_model.ple.per_layer_model_projection.weight       -> ple_proj.weight
   language_model.ple.per_layer_projection_norm.weight        -> ple_norm.weight
-  language_model.layers.{i}.self_attn.{q,k,v,o}_proj.weight  -> layers.i.attn.{q,k,v,o}
+  language_model.layers.{i}.self_attn.{q,k,v,o}_proj.weight  -> layers.i.attn.{q,k,v,o}.weight
   language_model.layers.{i}.self_attn.{q,k}_norm.weight      -> layers.i.attn.{q,k}_norm.weight
   language_model.layers.{i}.input_layernorm.weight           -> layers.i.in_norm.weight
   language_model.layers.{i}.post_attention_layernorm.weight  -> layers.i.post_attn.weight
   language_model.layers.{i}.pre_feedforward_layernorm.weight -> layers.i.pre_ff.weight
   language_model.layers.{i}.post_feedforward_layernorm.weight-> layers.i.post_ff.weight
-  language_model.layers.{i}.mlp.{gate,up,down}_proj.weight   -> layers.i.mlp.{gate,up,down}
-  language_model.layers.{i}.ple_block.per_layer_input_gate.weight -> layers.i.ple_gate
-  language_model.layers.{i}.ple_block.per_layer_projection.weight -> layers.i.ple_proj
+  language_model.layers.{i}.mlp.{gate,up,down}_proj.weight   -> layers.i.mlp.{gate,up,down}.weight
+  language_model.layers.{i}.ple_block.per_layer_input_gate.weight -> layers.i.ple_gate.weight
+  language_model.layers.{i}.ple_block.per_layer_projection.weight -> layers.i.ple_proj.weight
   language_model.layers.{i}.ple_block.post_per_layer_input_norm.weight -> layers.i.post_ple.weight
-  language_model.layers.{i}.layer_scalar                     -> layers.i.layer_scalar
+  language_model.layers.{i}.layer_scalar (1,)                -> layers.i.layer_scalar
   language_model.norm.weight                                 -> norm.weight
-  language_model.embedding_projection.weight                 -> out_proj
-  vision_tower.patch_embedder.input_proj.weight  W(768,768)  -> patch.weight = W.view(768,16,16,3).permute(0,3,1,2)*2 ; patch.bias = -W.sum(1)
-  vision_tower.patch_embedder.position_embedding_table (2,10240,768) -> pos[:, :, y, x] = T[0][x] + T[1][y]
-  vision_tower.encoder.layers.{i}.self_attn.{q,k,v,o}_proj.linear.weight -> layers.i.attn.{q,k,v,o}
+  language_model.embedding_projection.weight                 -> out_proj.weight
+  vision_tower.patch_embedder.input_proj.weight  W(768,768)  -> patch.weight = W.view(768,16,16,3).permute(0,3,1,2) (no bias; the model applies 2(x−0.5))
+  vision_tower.patch_embedder.position_embedding_table (2,10240,768) -> pos_table; VisionTower builds pos[:, :, y, x] = T[0][x] + T[1][y]
+  vision_tower.encoder.layers.{i}.self_attn.{q,k,v,o}_proj.linear.weight -> layers.i.attn.{q,k,v,o}.weight
   vision_tower.encoder.layers.{i}.self_attn.{q,k}_norm.weight            -> layers.i.attn.{q,k}_norm.weight
-  vision_tower.encoder.layers.{i}.{input,post_attention,pre_feedforward,post_feedforward}_layernorm.weight
-  vision_tower.encoder.layers.{i}.mlp.{gate,up,down}_proj.linear.weight
-  embed_vision.embedding_projection.weight                   -> mm_proj
+  vision_tower.encoder.layers.{i}.input_layernorm.weight                 -> layers.i.in_norm.weight
+  vision_tower.encoder.layers.{i}.post_attention_layernorm.weight        -> layers.i.post_attn.weight
+  vision_tower.encoder.layers.{i}.pre_feedforward_layernorm.weight       -> layers.i.pre_ff.weight
+  vision_tower.encoder.layers.{i}.post_feedforward_layernorm.weight      -> layers.i.post_ff.weight
+  vision_tower.encoder.layers.{i}.mlp.{gate,up,down}_proj.linear.weight  -> layers.i.mlp.{gate,up,down}.weight
+  embed_vision.embedding_projection.weight                   -> mm_proj.weight
   ```
 
   **Logit bound, checked at load time.** With `scaling = 1.0`, q and k leave their RMSNorms with rms 1 per head before the weights, so `|q·k| ≤ head_dim · max|q_norm.w| · max|k_norm.w|`. Assert that bound is ≤ 64 for every layer of both towers (google/embeddinggemma-2 measures about 32). A checkpoint above it could push logits past what the FP16 softmax and the `-1e4` mask margin are designed for; fail loudly instead of converting. Test it with a synthetic state dict on each side of the bound.

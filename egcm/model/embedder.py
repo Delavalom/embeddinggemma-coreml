@@ -13,6 +13,9 @@ from egcm.model.masks import key_mask
 from egcm.model.text import TextTower, rope_tables
 from egcm.model.vision import VisionTower
 
+# Sequence lengths of the text functions (embed_text_<L>); a text uses the smallest that fits.
+TEXT_LENGTHS = (16, 32, 64, 128)
+
 
 def l2_normalize(v: torch.Tensor) -> torch.Tensor:
     return v * torch.rsqrt((v * v).sum(-1, keepdim=True))
