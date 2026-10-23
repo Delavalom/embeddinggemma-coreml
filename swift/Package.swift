@@ -9,11 +9,10 @@ let package = Package(
   ],
   dependencies: [.package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.5")],
   targets: [
-    .target(name: "EmbeddingGemma", dependencies: [.product(name: "Tokenizers", package: "swift-transformers")],
-            resources: [.copy("Resources/tokenizer")]),
+    .target(name: "EmbeddingGemma", dependencies: [.product(name: "Tokenizers", package: "swift-transformers")]),
     .target(name: "EmbeddingIndex"),
     .executableTarget(name: "egcm-parity", dependencies: ["EmbeddingGemma"]),
-    .testTarget(name: "EmbeddingGemmaTests", dependencies: ["EmbeddingGemma"]),
+    .testTarget(name: "EmbeddingGemmaTests", dependencies: ["EmbeddingGemma"], exclude: ["Fixtures"]),
     .testTarget(name: "EmbeddingIndexTests", dependencies: ["EmbeddingIndex"]),
   ]
 )
