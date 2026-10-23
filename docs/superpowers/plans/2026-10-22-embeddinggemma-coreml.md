@@ -76,7 +76,7 @@
 ## Neural Engine rewrite rules (from Apple's `ml-ane-transformers`)
 
 - **Layout:** hidden states are `(1, C, 1, S)`, and every Linear is a `Conv2d(1×1)`.
-- **RMSNorm:** reduces over the channel dim (1), scale-safe form: `x/s · rsqrt(mean((x/s)²) + eps/s²)`, where `s` is a per-norm constant (default 1, set from the probe in s3).
+- **RMSNorm:** reduces over the channel dim (1), scaled per token: `m = max(max_c|x|, 2⁻⁶)`, `xs = x/m`, `y = xs · rsqrt(mean(xs²) + (sqrt(eps)/m)²)`. Exact in maths; `|xs| ≤ 1` so `x²` never overflows FP16, and `sqrt(eps)` is a normal FP16 value where `eps` (subnormal) would be flushed to 0 by the Neural Engine. No per-norm constant and no probe-driven tuning.
 - **Attention:** per head, using `einsum('bchq,bkhc->bkhq')`; no 5-D tensors. Softmax over dim 1.
 - **Vision patchify:** `Conv2d(3→768, k=16, s=16)`, with the weight built from `input_proj.weight.view(768,16,16,3).permute(0,3,1,2) * 2` and the bias set to `-input_proj.weight.sum(1)`. This folds in `2(x−0.5)`.
 - **Vision position embeddings and every RoPE cos/sin:** precomputed per bucket and stored as constants.
@@ -100,7 +100,7 @@ embeddinggemma-coreml/
   egcm/metrics.py                       # cosine, recall@k, spearman
   egcm/config.py                        # typed model config from HF config.json
   egcm/buckets.py                       # bucket table + selection + resize-size math
-  egcm/model/norm.py                    # RMSNorm (channels-first, scale-safe)
+  egcm/model/norm.py                    # RMSNorm (channels-first, per-token max-abs scaled)
   egcm/model/rope.py                    # 1-D and 2-D axial rope tables
   egcm/model/attention.py               # ANE attention (text and vision)
   egcm/model/text.py                    # TextTower
@@ -608,7 +608,7 @@ def choose_bucket(height: int, width: int, budget: int) -> Bucket:
 
 ### Task 7: Config and the scale-safe RMSNorm
 
-> **Implemented, then amended after review.** The code below is the original draft; `egcm/config.py` and `egcm/model/norm.py` are authoritative. Changes: `eps/s²` is floored at `2**-24` (`eps_eff`) so fp16 never sees eps = 0; `config.load()` resolves `per_layer_config` per layer and rejects configs the rewrite does not implement (non-default rope, `standardize`, clipped linears, `attention_bias`, `sliding_window < buckets.MAX_SEQ`).
+> **Implemented, then amended after review.** The code below is the original draft; `egcm/config.py` and `egcm/model/norm.py` are authoritative. Changes: the fixed `prescale` was replaced by the per-token dynamic form (see "Neural Engine rewrite rules"), so there is no `prescale` argument; `config.load()` resolves `per_layer_config` per layer and rejects configs the rewrite does not implement (non-default rope, `standardize`, clipped linears, `attention_bias`, `sliding_window < buckets.MAX_SEQ`). The config's per-type tables are read-only mappings.
 
 **Files:** create `egcm/config.py`, `egcm/model/norm.py`, `tests/test_norm.py`.
 
@@ -1154,8 +1154,8 @@ def merge_multifunction(parts: dict[str, Path], out_path: Path, default: str):
 
 **Files:** create `egcm/probe.py`, `stages/s3_coreml_ane/run.py`, README.
 
-- [ ] **Step 1: Implement `probe.py`.** Register forward hooks on every `RMSNormCF`, `AttentionCF`, `MLP` and residual output of the s1 FP32 rewrite (residual outputs captured by wrapping `Layer.forward`). Record the max |x| per module over all fixtures. Write `artifacts/s3_coreml_ane/probe.json` sorted descending. Flag > 30000 as `overflow_risk`, and > 3000 for squared terms inside norms (`x²` above 65504 means |x| > 256 inside the mean, so in practice every norm whose *input* max exceeds 256 needs a prescale).
-- [ ] **Step 2: Apply prescales automatically.** For each `RMSNormCF` whose input max exceeds 256, set `prescale = 2**ceil(log2(max/64))`. This is exact in math. Persist the chosen prescales in `artifacts/s3_coreml_ane/prescales.json` and log them in the report details.
+- [ ] **Step 1: Implement `probe.py`** (diagnostic only). Register forward hooks on every `RMSNormCF`, `AttentionCF`, `MLP` and residual output of the s1 FP32 rewrite (residual outputs captured by wrapping `Layer.forward`). Record the max |x| per module over all fixtures. Write `artifacts/s3_coreml_ane/probe.json` sorted descending and flag > 30000 as `overflow_risk`. Norm inputs need no flag: `RMSNormCF` scales each token by its own max, so it is FP16-safe at any input scale.
+- [ ] **Step 2: (Removed.)** Probe-driven norm prescales are gone: `RMSNormCF` is scale-safe per token by construction. The probe now only diagnoses; the check that still matters is the **residual stream** itself (and MLP / attention outputs) against FP16 range, handled by mitigation (b) in Step 4.
 - [ ] **Step 3: Write `run.py`.** Re-convert all functions with `compute_precision=ct.precision.FLOAT16`. Load with `compute_units=ct.ComputeUnit.CPU_AND_NE`. Measure:
   - cosines against s0;
   - **Neural Engine fraction**: `ct.models.compute_plan.MLComputePlan.load_from_path(compiled_path, compute_units=CPU_AND_NE)`, then iterate the program's operations, get `get_compute_device_usage_for_mlprogram_operation(op).preferred_compute_device`, and count `MLNeuralEngineComputeDevice` over all ops that have a usage (the minimum over functions).
@@ -1165,7 +1165,7 @@ def merge_multifunction(parts: dict[str, Path], out_path: Path, default: str):
   1. Read probe.json and check that the residual stream itself (not just norm inputs) exceeds 30000. If it does, apply mitigation (b): scale the embeddings and every residual add by `1/s`. RMSNorm after it is invariant, `layer_scalar` is unchanged, and the final `norm` is invariant, so this is exact math. Implement it as a `residual_scale` constructor arg on `TextTower`/`Layer` that divides `emb` and nothing else. Since every sub-block output is re-normalized by post-norms (whose weights then produce full-scale values), also divide each post-norm weight by `s`.
   2. If (b) still isn't enough, use mitigation (c): `op_selector` keeps the flagged ops FP32 (`ct.transform.FP16ComputePrecision(op_selector=...)`), then re-measure the Neural Engine fraction.
   3. If it still fails at ≥ 95%, take the **GPU fallback**: ADR-0004 (ADR-0003 is the initial gate set), convert with `compute_units=CPU_AND_GPU` gating, and change `gates.toml` `[s3_coreml_ane] min_ane_fraction` → `0` **with ADR-0004 in the same commit**.
-- [ ] **Step 5: Commit** the passing state: `git commit -am "feat(s3): fp16 ANE conversion with probe-driven prescales"`.
+- [ ] **Step 5: Commit** the passing state: `git commit -am "feat(s3): fp16 ANE conversion"`.
 
 ### Task 15: s4 compression
 

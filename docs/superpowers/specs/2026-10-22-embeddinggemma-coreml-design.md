@@ -154,7 +154,7 @@ Swift resizes each photo into the closest bucket. s4's recall gate measures the 
 
 1. `probe.py` records the max |activation| per layer and sublayer for all fixtures in FP32. Anything above about 30,000 is flagged as an overflow risk.
 2. Mitigations, applied only where the probe flags them, each recorded as an ADR:
-   - **(a)** RMSNorm computed as `x/s · rsqrt(mean((x/s)²)+eps/s²)` with a per-layer constant `s`;
+   - **(a)** RMSNorm scaled per token by its own max |x| (`egcm/model/norm.py`): exact, never overflows, and keeps eps out of FP16 subnormals. Built in from Task 7, so it is no longer applied conditionally;
    - **(b)** fold a constant scale-down into the residual stream, compensated in the weights;
    - **(c)** keep specific ops in FP32 through `op_selector`, accepting that they leave the Neural Engine.
 3. Fallback if (a)+(b) can't reach the gate with ≥ 95% on the Neural Engine: ship a `cpuAndGPU` variant with FP32 norms, labeled in RESULTS.md. Recorded as an ADR; no founder approval needed.

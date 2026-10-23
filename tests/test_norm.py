@@ -1,3 +1,4 @@
+import pytest
 import torch
 from upstream import RMSNorm as UpstreamRMSNorm
 
@@ -31,55 +32,55 @@ def test_matches_upstream_without_scale():
     assert torch.allclose(from_cf(n(to_cf(x))), UpstreamRMSNorm(256, with_scale=False)(x), rtol=1e-5, atol=1e-6)
 
 
-def test_scale_safe_identical_in_fp32():
-    torch.manual_seed(2)
-    x = torch.randn(1, 512, 1, 9) * 4000
-    a, b = RMSNormCF(512, with_scale=False), RMSNormCF(512, with_scale=False, prescale=256.0)
-    assert torch.allclose(a(x), b(x), rtol=1e-5, atol=1e-6)
+# rms of the input tokens, from far below eps (1e-6 vs mean(x²) = 1e-8) to the largest residual streams seen
+SCALES = [1e-4, 1e-2, 1.0, 100.0, 4000.0]
 
 
-def test_scale_safe_fp16_matches_fp32():
-    torch.manual_seed(3)
-    x = torch.randn(1, 512, 1, 9) * 4000  # x² overflows fp16 (max 65504) without the prescale
-    want = RMSNormCF(512, with_scale=False)(x)
-    got = RMSNormCF(512, with_scale=False, prescale=256.0).half()(x.half())
+def tokens(rms, S=9, C=512, seed=0):
+    torch.manual_seed(seed)
+    x = torch.randn(S, C) * rms
+    x[0, 3] = 6 * rms  # an outlier channel, as residual streams have
+    return x
+
+
+@pytest.mark.parametrize("rms", SCALES)
+def test_matches_upstream_fp32_across_scales(rms):
+    x = tokens(rms)
+    w = torch.rand(512) + 0.5
+    ref = UpstreamRMSNorm(512)
+    ref.weight.data = w.clone()
+    n = RMSNormCF(512)
+    n.weight.data = w.clone()
+    want, got = ref(x), from_cf(n(to_cf(x)))
+    assert (got - want).abs().max() <= 1e-5 * want.abs().max()
+
+
+# CPU fp16 is the strict check available in a unit test: torch keeps fp16 subnormals on the CPU, the ANE flushes
+# them. The dynamic scaling is built so the ANE never needs a subnormal (see RMSNormCF); the on-device verdict is
+# s3's cosine gate on the real model, not this test.
+@pytest.mark.parametrize("rms", SCALES)
+def test_fp16_error_bounded_across_scales(rms):
+    x = tokens(rms)
+    want = UpstreamRMSNorm(512, with_scale=False)(x)
+    got = from_cf(RMSNormCF(512, with_scale=False).half()(to_cf(x).half())).float()
     assert torch.isfinite(got).all()
-    assert torch.allclose(got.float(), want, atol=1e-2)
-    plain = RMSNormCF(512, with_scale=False).half()(x.half())
-    assert not torch.allclose(plain.float(), want, atol=1e-2)  # the failure the prescale exists to fix
+    assert (got - want).abs().max() <= 5e-3 * want.abs().max()
 
 
-def test_prescale_keeps_eps_exact():
-    """eps must be scaled to eps/s². Tiny inputs (mean(x²) << eps) make eps dominate, so using plain eps would
-    change the output by about a factor s. s <= 4 keeps eps/s² above the fp16 floor, so no floor applies."""
-    torch.manual_seed(4)
-    x = torch.randn(5, 512) * 1e-4
-    assert x.pow(2).mean() < 1e-6 / 50
-    want = UpstreamRMSNorm(512, eps=1e-6, with_scale=False)(x)
-    for s in (2.0, 4.0):
-        got = from_cf(RMSNormCF(512, eps=1e-6, with_scale=False, prescale=s)(to_cf(x)))
-        assert torch.allclose(got, want, rtol=1e-5, atol=1e-7), s
-
-
-def test_eps_floor():
-    assert RMSNormCF(8, eps=1e-6).eps_eff == 1e-6  # s = 1: unchanged
-    assert RMSNormCF(8, eps=1e-6, prescale=4.0).eps_eff == 1e-6 / 16
-    assert RMSNormCF(8, eps=1e-6, prescale=256.0).eps_eff == 2.0**-24  # 1e-6 / 65536 would be 0 in fp16
-
-
-def test_scale_safe_fp16_zero_input():
-    y = RMSNormCF(512, with_scale=False, prescale=256.0).half()(torch.zeros(1, 512, 1, 3, dtype=torch.half))
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+def test_zero_token_stays_finite(dtype):
+    x = torch.randn(1, 512, 1, 3)
+    x[..., 1] = 0  # one all-zero token among normal ones
+    y = RMSNormCF(512, with_scale=False).to(dtype)(x.to(dtype))
     assert torch.isfinite(y).all()
-    assert (y == 0).all()
+    assert (y[..., 1] == 0).all()
 
 
-def test_scale_safe_fp16_small_input():
-    """fp16 agrees with the same prescaled module in fp32. Both differ from the exact norm here (rms 0.01 is far
-    below what s = 256 suits, see RMSNormCF); this checks finiteness and fp16 agreement only."""
-    torch.manual_seed(5)
-    x = torch.randn(1, 512, 1, 9) * 0.01
-    n = RMSNormCF(512, with_scale=False, prescale=256.0)
-    want = n(x)
-    got = n.half()(x.half())
-    assert torch.isfinite(got).all()
-    assert torch.allclose(got.float(), want, rtol=0.05, atol=0.01 * want.abs().max().item())
+@pytest.mark.parametrize("eps", [1e-6, 1e-3])
+def test_eps_semantics(eps):
+    """Tiny inputs (mean(x²) = 1e-10, far below eps) make eps dominate, so a wrongly scaled eps changes the output
+    by orders of magnitude. Each eps must match the upstream norm with that eps."""
+    x = tokens(1e-5)
+    want = UpstreamRMSNorm(512, eps=eps, with_scale=False)(x)
+    got = from_cf(RMSNormCF(512, eps=eps, with_scale=False)(to_cf(x)))
+    assert torch.allclose(got, want, rtol=1e-5, atol=1e-9)
