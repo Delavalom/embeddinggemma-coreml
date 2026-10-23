@@ -47,3 +47,39 @@ def test_scale_safe_fp16_matches_fp32():
     assert torch.allclose(got.float(), want, atol=1e-2)
     plain = RMSNormCF(512, with_scale=False).half()(x.half())
     assert not torch.allclose(plain.float(), want, atol=1e-2)  # the failure the prescale exists to fix
+
+
+def test_prescale_keeps_eps_exact():
+    """eps must be scaled to eps/s². Tiny inputs (mean(x²) << eps) make eps dominate, so using plain eps would
+    change the output by about a factor s. s <= 4 keeps eps/s² above the fp16 floor, so no floor applies."""
+    torch.manual_seed(4)
+    x = torch.randn(5, 512) * 1e-4
+    assert x.pow(2).mean() < 1e-6 / 50
+    want = UpstreamRMSNorm(512, eps=1e-6, with_scale=False)(x)
+    for s in (2.0, 4.0):
+        got = from_cf(RMSNormCF(512, eps=1e-6, with_scale=False, prescale=s)(to_cf(x)))
+        assert torch.allclose(got, want, rtol=1e-5, atol=1e-7), s
+
+
+def test_eps_floor():
+    assert RMSNormCF(8, eps=1e-6).eps_eff == 1e-6  # s = 1: unchanged
+    assert RMSNormCF(8, eps=1e-6, prescale=4.0).eps_eff == 1e-6 / 16
+    assert RMSNormCF(8, eps=1e-6, prescale=256.0).eps_eff == 2.0**-24  # 1e-6 / 65536 would be 0 in fp16
+
+
+def test_scale_safe_fp16_zero_input():
+    y = RMSNormCF(512, with_scale=False, prescale=256.0).half()(torch.zeros(1, 512, 1, 3, dtype=torch.half))
+    assert torch.isfinite(y).all()
+    assert (y == 0).all()
+
+
+def test_scale_safe_fp16_small_input():
+    """fp16 agrees with the same prescaled module in fp32. Both differ from the exact norm here (rms 0.01 is far
+    below what s = 256 suits, see RMSNormCF); this checks finiteness and fp16 agreement only."""
+    torch.manual_seed(5)
+    x = torch.randn(1, 512, 1, 9) * 0.01
+    n = RMSNormCF(512, with_scale=False, prescale=256.0)
+    want = n(x)
+    got = n.half()(x.half())
+    assert torch.isfinite(got).all()
+    assert torch.allclose(got.float(), want, rtol=0.05, atol=0.01 * want.abs().max().item())
