@@ -16,11 +16,13 @@ conversions (0.5 to 2 minutes each), 14 merges (0.5 to 1 minute), then 200 texts
 1. `egcm.parts.build`: each function in `egcm.functions.FUNCTIONS` is converted in its own process
    (`python -m egcm.parts convert`: loads only the weights it needs, traces, frees the torch module, converts at
    FP32, saves the part, exits with its memory and temporary files), then merged into the package in its own process
-   (`python -m egcm.parts merge`: package so far + that part, `save_multifunction`, no torch), and the part is
+   (`python -m egcm.parts merge`: package so far + that part with the streaming merge in `egcm/mfmerge.py`, no
+   torch, constant memory), and the part is
    deleted. Resumable: `build.json` records the code hash, merged functions and package sha, so a rerun continues
    where the last one stopped. Guards: a child exits if its physical footprint passes 9 GB or swap grows by more
    than 6 GB; no step starts if it would leave less than 25 GB free. Measured 2026-10-23: conversion peaks at about
-   2.6 GB (text) / 3.3 GB (image), a merge at about 4 GB; disk peaks at package + part + temporary copy (≈ 4.5 GB).
+   2.6 GB (text) / 3.3 GB (image), a merge at about 1.5 GB (coremltools' `save_multifunction` grew by about 1.1 GB per
+   function merged, 8.1 GB at five, so it is not used); disk peaks at package + part + new package (≈ 4.5 GB).
 2. Checks the I/O contract of every function (`contract_problems`); a mismatch raises.
 3. Compiles the package once and loads each function with `CompiledMLModel(function_name=...)` on `CPU_ONLY`.
 4. Texts: padded with the config's `pad_id` to the smallest of 16/32/64/128, int32 mask. Images: s0's bucket pixels.

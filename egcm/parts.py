@@ -5,7 +5,8 @@ This Mac has 16 GB of RAM shared with other apps, so a stage never holds more th
   traces, frees the torch module, converts, optionally compresses with each recipe, saves, and exits; its memory and
   coremltools' temporary packages (its own TMPDIR, deleted by the parent) go with it.
 - **One merge per process** (`python -m egcm.parts merge ...`): the package so far + one part -> the new package,
-  with `save_multifunction` (constants with identical values are stored once). No torch in that process.
+  with the streaming merge in egcm.mfmerge (constant memory; weights with identical values are stored once). No
+  torch in that process.
 - **Resumable**: `build.json` next to the packages records the stage's code hash, each package's merged functions and
   its content sha256, and each saved part's sha256. A rerun with the same code skips merged functions and reuses saved
   parts whose sha matches; different code starts over.
@@ -170,26 +171,18 @@ def _convert_child(name: str, precision: str, out: Path, recipes: list[str]) -> 
 
 # --- child: merge one part into a package ---------------------------------------------------------------------
 def _merge_child(into: Path, part: Path, name: str) -> dict:
-    import coremltools as ct
-
+    """The package so far + one part -> the new package, with the streaming merge (egcm.mfmerge: constant memory;
+    coremltools' save_multifunction needs memory for every function's weights)."""
+    from egcm import mfmerge
     from egcm.functions import DEFAULT_FUNCTION
 
     guard = Guard()
-    desc = ct.utils.MultiFunctionDescriptor()
-    names = []
+    sources = []
     if into.exists():
-        for f in ct.utils.load_spec(str(into)).description.functions:
-            desc.add_function(str(into), src_function_name=f.name, target_function_name=f.name)
-            names.append(f.name)
-    desc.add_function(str(part), src_function_name="main", target_function_name=name)
-    names.append(name)
-    desc.default_function_name = DEFAULT_FUNCTION if DEFAULT_FUNCTION in names else names[0]
-    tmp = into.with_name(into.stem + ".merging.mlpackage")
-    shutil.rmtree(tmp, ignore_errors=True)
-    ct.utils.save_multifunction(desc, str(tmp))
-    shutil.rmtree(into, ignore_errors=True)
-    tmp.rename(into)
-    return {"functions": names, "peak_footprint_gb": round(max(guard.peak, footprint_gb()), 2)}
+        sources = [(into, f.name, f.name) for f in mfmerge.load_spec(into).description.functions]
+    sources.append((part, "main", name))
+    res = mfmerge.merge(sources, into, DEFAULT_FUNCTION)
+    return res | {"peak_footprint_gb": round(max(guard.peak, footprint_gb()), 2)}
 
 
 # --- parent -----------------------------------------------------------------------------------------------------
