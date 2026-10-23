@@ -111,8 +111,8 @@ egcm/                     shared Python library
   metrics.py              cosine, recall@k, spearman
   buckets.py              bucket table, selection, resize-size math
   config.py               typed model config from HF config.json; checks the assumptions the rewrite relies on
-  model/                  norm.py (RMSNormCF) rope.py (1-D / axial 2-D tables) attention.py (AttentionCF);
-                          text.py vision.py embedder.py (planned: Tasks 10–11)
+  model/                  norm.py (RMSNormCF) rope.py (1-D / axial 2-D tables) attention.py (AttentionCF)
+                          masks.py (key_mask); text.py vision.py embedder.py (planned: Tasks 10–11)
   weights.py              safetensors -> rewrite mapping, strict (planned: Task 12)
   convert.py              torch -> mlpackage + multifunction merge (planned: Task 13)
   compress.py             int8 / palettize (planned: Task 15)
