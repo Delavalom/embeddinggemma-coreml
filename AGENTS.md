@@ -110,9 +110,11 @@ egcm/                     shared Python library
   stage.py                run_stage: the runner every stage uses
   metrics.py              cosine, recall@k, spearman
   buckets.py              bucket table, selection, resize-size math
-  config.py               typed model config from HF config.json (planned: Task 7)
-  model/                  norm.py rope.py attention.py text.py vision.py embedder.py (planned: Tasks 7–11)
-  weights.py              safetensors -> rewrite mapping, strict (planned: Task 12)
+  config.py               typed model config from HF config.json; checks the assumptions the rewrite relies on
+  model/                  norm.py (RMSNormCF) rope.py (1-D / axial 2-D tables) attention.py (AttentionCF)
+                          masks.py (key_mask); text.py (TextTower) vision.py (VisionEncoder, VisionTower per
+                          bucket) embedder.py (TextEmbedder, ImageEmbedder: the Core ML entry points)
+  weights.py              safetensors -> rewrite mapping, strict load, q.k logit bound check
   convert.py              torch -> mlpackage + multifunction merge (planned: Task 13)
   compress.py             int8 / palettize (planned: Task 15)
   probe.py                activation max-abs probe (planned: Task 14)
