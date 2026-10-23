@@ -7,7 +7,9 @@ A report is stale when the code that produced it (`code_hash`) or the inputs it 
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +41,24 @@ STAGE_INPUTS: dict[str, StageInputs] = {
 }
 
 
+# The paths whose code decides each stage's *outputs*. Infrastructure (egcm/stage.py, provenance.py, report.py,
+# gates.py, scripts/) is deliberately absent: changing how reports are written does not change what a stage
+# computes. The stage's own [table] in gates.toml is hashed as well (see gate_table); other tables are not.
+_LOCK = ("pyproject.toml", "uv.lock")
+_REWRITE = ("egcm/model", "egcm/config.py", "egcm/weights.py")
+_COMPARE = ("egcm/buckets.py", "egcm/metrics.py", "egcm/fixtures.py", "egcm/paths.py")
+STAGE_CODE: dict[str, tuple[str, ...]] = {
+    "s0_reference": ("stages/s0_reference", "egcm/buckets.py", "egcm/fixtures.py", "egcm/paths.py", *_LOCK),
+    "s1_rewrite": ("stages/s1_rewrite", *_REWRITE, *_COMPARE, *_LOCK),
+    "s2_coreml_fp32": ("stages/s2_coreml_fp32", "egcm/convert.py", *_REWRITE, *_COMPARE, *_LOCK),
+    "s3_coreml_ane": ("stages/s3_coreml_ane", "egcm/convert.py", "egcm/probe.py", *_REWRITE, *_COMPARE, *_LOCK),
+    "s4_compress": ("stages/s4_compress", "egcm/compress.py", "egcm/convert.py", *_REWRITE, *_COMPARE, *_LOCK),
+    "s5_swift": ("stages/s5_swift", "swift", *_COMPARE, *_LOCK),
+    "s6_device": ("stages/s6_device", "swift", "Examples", "egcm/metrics.py", "egcm/paths.py", *_LOCK),
+    "s7_publish": ("stages/s7_publish", "swift", "egcm/paths.py", *_LOCK),
+}
+
+
 def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, check=check)
 
@@ -48,26 +68,45 @@ def git_sha(root: Path = ROOT) -> str:
 
 
 def watched_paths(stage: str) -> list[str]:
-    """The paths whose content decides a stage's result (uv.lock fixes the installed package versions)."""
-    return ["egcm", f"stages/{stage}", "gates.toml", "pyproject.toml", "uv.lock"]
+    """The code paths whose content decides a stage's outputs (uv.lock fixes the installed package versions)."""
+    if stage not in STAGE_CODE:
+        raise ValueError(f"unknown stage {stage!r}")
+    return list(STAGE_CODE[stage])
+
+
+def gate_table(stage: str, root: Path = ROOT, rev: str | None = None) -> str:
+    """The stage's own table in gates.toml as canonical JSON (values only; comments and layout do not count).
+
+    `rev` reads the committed file (e.g. "HEAD"); None reads the working tree. "absent" if there is no table."""
+    if rev is None:
+        p = root / "gates.toml"
+        text = p.read_text() if p.is_file() else ""
+    else:
+        r = _git(root, "show", f"{rev}:gates.toml", check=False)
+        text = r.stdout.decode() if r.returncode == 0 else ""
+    table = tomllib.loads(text).get(stage) if text else None
+    return "absent" if table is None else json.dumps(table, sort_keys=True)
 
 
 def git_dirty(stage: str, root: Path = ROOT) -> bool:
-    """True if any watched path differs from HEAD (modified, staged or untracked)."""
-    return bool(_git(root, "status", "--porcelain", "--", *watched_paths(stage)).stdout.strip())
+    """True if any watched path differs from HEAD (modified, staged or untracked), or the stage's gate table does."""
+    if _git(root, "status", "--porcelain", "--", *watched_paths(stage)).stdout.strip():
+        return True
+    return gate_table(stage, root) != gate_table(stage, root, rev="HEAD")
 
 
 def code_hash(stage: str, root: Path = ROOT) -> str:
-    """sha256 over `git rev-parse HEAD:<path>` for each watched path.
+    """sha256 over `git rev-parse HEAD:<path>` for each watched path, plus the stage's gate table.
 
-    If the tree is dirty, also hashes `git diff HEAD` and the contents of untracked files in those paths.
-    """
+    If the code paths are dirty, also hashes `git diff HEAD` and the contents of untracked files in them. The gate
+    table is hashed by value from the working tree, so it never needs the diff."""
     paths = watched_paths(stage)
     h = hashlib.sha256()
     for p in paths:
         r = _git(root, "rev-parse", f"HEAD:{p}", check=False)
         h.update(f"{p}={r.stdout.decode().strip() if r.returncode == 0 else 'absent'}\n".encode())
-    if git_dirty(stage, root):
+    h.update(f"gates:{gate_table(stage, root)}\n".encode())
+    if _git(root, "status", "--porcelain", "--", *paths).stdout.strip():
         h.update(_git(root, "diff", "HEAD", "--", *paths).stdout)
         untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z", "--", *paths).stdout
         for name in sorted(n for n in untracked.decode().split("\0") if n):
