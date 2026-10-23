@@ -1,0 +1,8 @@
+Read-only copies of upstream reference code. Never imported by egcm.
+Repo:   https://github.com/huggingface/transformers
+Commit: 6b6792ff3b1a434913dc59659d4461acc9c3a51a (main, fetched 2026-10-22)
+License: Apache-2.0
+
+src/transformers/models/embedding_gemma2/modeling_embedding_gemma2.py
+src/transformers/models/gemma4/modeling_gemma4.py
+src/transformers/models/gemma4/image_processing_gemma4.py

@@ -1,0 +1,23 @@
+[s0]
+deterministic = true
+[s1]
+min_cosine_text = 0.9999
+min_cosine_image = 0.9999
+[s2]
+min_cosine_text = 0.9999
+min_cosine_image = 0.9999
+[s3]
+min_cosine_text = 0.995
+min_cosine_image = 0.995
+min_ane_fraction = 0.95
+[s4]
+min_cosine = 0.99
+min_recall_at_10 = 0.95
+min_spearman_top50 = 0.9
+max_download_mb = 300
+[s5]
+max_pixel_abs_diff = 0.003922
+min_cosine = 0.99
+[s6]
+max_peak_rss_mb = 800
+target_ms_per_image_70 = 60

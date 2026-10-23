@@ -1,0 +1,14 @@
+embeddinggemma-coreml
+Copyright 2026 Delavalom
+
+This product includes software developed by third parties:
+
+- EmbeddingGemma 2 (google/embeddinggemma-2), model weights and architecture,
+  Copyright Google LLC, licensed under the Apache License, Version 2.0.
+  https://huggingface.co/google/embeddinggemma-2
+
+- Reference code in vendor/reference/ is copied unmodified from Hugging Face
+  Transformers, Copyright The Hugging Face Team, licensed under the Apache
+  License, Version 2.0. It is kept for reading only and is never imported.
+  https://github.com/huggingface/transformers (see vendor/reference/SOURCE.txt
+  for the exact commit).
