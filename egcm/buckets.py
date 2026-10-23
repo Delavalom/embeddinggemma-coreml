@@ -45,6 +45,12 @@ BUCKETS = (
     Bucket(280, "wide", 528, 1152),
 )
 
+# The image sequence s0 recorded from the processor (image_token_layout.json) is
+# [<bos>, <|image>, <|image|> x soft tokens, <image|>, <eos>]: soft tokens + 4.
+IMAGE_SPECIAL_TOKENS = 4
+# Longest sequence any function builds (284). Text functions are at most 128 tokens, so the image buckets set it.
+MAX_SEQ = max(b.tokens for b in BUCKETS) + IMAGE_SPECIAL_TOKENS
+
 
 def _check(height: int, width: int, budget: int) -> None:
     if height <= 0 or width <= 0:

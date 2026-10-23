@@ -1,12 +1,15 @@
 """Typed model config read from the Hugging Face `config.json` of google/embeddinggemma-2.
 
-`load` also checks the assumptions the rewrite is built on (rope types, no standardize, no clipped linears,
-one head_dim / kv_heads per layer type) and raises ValueError if the file breaks one of them.
+`load` also checks the assumptions the rewrite is built on (rope types, no standardize, no clipped linears, no
+attention bias, one head_dim / kv_heads per layer type, a sliding window covering every sequence we build) and
+raises ValueError if the file breaks one of them.
 """
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from egcm.buckets import MAX_SEQ
 
 LAYER_TYPES = ("sliding_attention", "full_attention")
 
@@ -65,7 +68,17 @@ def _per_type(t: dict, field: str, default_key: str) -> dict[str, int]:
     return {kind: value for kind, (value, _) in seen.items()}
 
 
+def _no_attention_bias(c: dict, tower: str) -> None:
+    if c.get("attention_bias", False):
+        raise ValueError(f"{tower} attention_bias is true; the rewrite's q/k/v/o convs have no bias")
+
+
 def _text(t: dict) -> TextCfg:
+    _no_attention_bias(t, "text")
+    if t["sliding_window"] < MAX_SEQ:
+        raise ValueError(
+            f"sliding_window {t['sliding_window']} < MAX_SEQ {MAX_SEQ}: sliding layers would need their own mask"
+        )
     layer_types = tuple(t["layer_types"])
     if len(layer_types) != t["num_hidden_layers"] or set(layer_types) - set(LAYER_TYPES):
         raise ValueError(f"unexpected layer_types {layer_types}")
@@ -85,6 +98,7 @@ def _text(t: dict) -> TextCfg:
 
 
 def _vision(v: dict) -> VisionCfg:
+    _no_attention_bias(v, "vision")
     if v["rope_parameters"]["rope_type"] != "axial":
         raise ValueError(f"vision rope_type is {v['rope_parameters']['rope_type']}; only 'axial' is implemented")
     for flag in ("standardize", "use_clipped_linears"):

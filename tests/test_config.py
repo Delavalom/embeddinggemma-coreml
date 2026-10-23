@@ -3,6 +3,7 @@ import json
 import pytest
 
 from egcm import config
+from egcm.buckets import MAX_SEQ
 from egcm.paths import HF_SNAPSHOT
 
 FULL = (5, 11, 17, 23)
@@ -14,7 +15,7 @@ def fake_config(**text_overrides):
     text = {
         "hidden_size": 512, "num_hidden_layers": 24, "num_attention_heads": 4, "num_key_value_heads": 2,
         "head_dim": 256, "intermediate_size": 2048, "hidden_size_per_layer_input": 512, "embedding_dim": 768,
-        "vocab_size": 262144, "rms_norm_eps": 1e-6, "pad_token_id": 0, "sliding_window": 512,
+        "vocab_size": 262144, "rms_norm_eps": 1e-6, "pad_token_id": 0, "sliding_window": 512, "attention_bias": False,
         "layer_types": layer_types,
         "per_layer_config": {f"{i:02d}": {"head_dim": 512, "num_key_value_heads": 1} for i in FULL},
         "rope_parameters": {
@@ -27,7 +28,7 @@ def fake_config(**text_overrides):
         "hidden_size": 768, "num_hidden_layers": 16, "num_attention_heads": 12, "num_key_value_heads": 12,
         "head_dim": 64, "intermediate_size": 3072, "patch_size": 16, "pooling_kernel_size": 3,
         "rope_parameters": {"rope_theta": 100.0, "rope_type": "axial"}, "rms_norm_eps": 1e-6,
-        "position_embedding_size": 10240, "standardize": False, "use_clipped_linears": False,
+        "position_embedding_size": 10240, "standardize": False, "use_clipped_linears": False, "attention_bias": False,
     }
     return {"text_config": text, "vision_config": vision}
 
@@ -74,6 +75,20 @@ def test_unsupported_vision_options_rejected(tmp_path):
     c["vision_config"]["standardize"] = True
     with pytest.raises(ValueError, match="standardize"):
         config.load(write(tmp_path, c))
+
+
+@pytest.mark.parametrize("tower", ["text_config", "vision_config"])
+def test_attention_bias_rejected(tmp_path, tower):
+    c = fake_config()
+    c[tower]["attention_bias"] = True
+    with pytest.raises(ValueError, match="attention_bias"):
+        config.load(write(tmp_path, c))
+
+
+def test_sliding_window_shorter_than_max_seq_rejected(tmp_path):
+    with pytest.raises(ValueError, match="sliding_window"):
+        config.load(write(tmp_path, fake_config(sliding_window=MAX_SEQ - 1)))
+    config.load(write(tmp_path, fake_config(sliding_window=MAX_SEQ)))  # equal is fine: every token is in the window
 
 
 @pytest.mark.skipif(not (HF_SNAPSHOT / "config.json").exists(), reason="HF snapshot not downloaded (run s0)")

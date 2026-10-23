@@ -1,4 +1,5 @@
 import ast
+import json
 import math
 import random
 from pathlib import Path
@@ -8,10 +9,13 @@ import pytest
 from egcm.buckets import (
     ASPECT_EDGES,
     BUCKETS,
+    IMAGE_SPECIAL_TOKENS,
+    MAX_SEQ,
     aspect_preserving_size,
     choose_bucket,
     worst_case_stretch,
 )
+from egcm.paths import ARTIFACTS
 
 UPSTREAM = Path(__file__).resolve().parents[1] / "vendor/reference/image_processing_gemma4.py"
 
@@ -111,3 +115,22 @@ def test_unsupported_budget_raises():
         aspect_preserving_size(100, 100, 100)
     with pytest.raises(ValueError, match="budget"):
         choose_bucket(100, 100, 100)
+
+
+def test_max_seq():
+    assert MAX_SEQ == 280 + 4 == max(b.tokens for b in BUCKETS) + IMAGE_SPECIAL_TOKENS
+
+
+LAYOUT = ARTIFACTS / "s0_reference" / "image_token_layout.json"
+
+
+@pytest.mark.skipif(not LAYOUT.exists(), reason="s0 has not run")
+def test_special_tokens_match_s0_layout():
+    """s0 records the processor's real image sequence for one image per bucket: soft tokens + 4 special tokens."""
+    recorded = json.loads(LAYOUT.read_text())["buckets"]
+    assert {b.function_name for b in BUCKETS} == set(recorded)
+    for b in BUCKETS:
+        entry = recorded[b.function_name]
+        assert entry["soft_tokens"] == b.tokens
+        assert entry["length"] == len(entry["input_ids"]) == b.tokens + IMAGE_SPECIAL_TOKENS
+    assert max(e["length"] for e in recorded.values()) == MAX_SEQ
