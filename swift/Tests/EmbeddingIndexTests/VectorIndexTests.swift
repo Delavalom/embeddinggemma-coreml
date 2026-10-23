@@ -129,7 +129,9 @@ func invalidDimensionsThrowInsteadOfTrapping(_ d: Int) {
   let idx = try VectorIndex(url: url, dimensions: 32, modelRevision: "r")
   let vs = rand(50, 32, seed: 11)
   for (i, v) in vs.enumerated() { try idx.upsert(id: "k\(i)", vector: v) }
+  #if arch(arm64)  // Swift's Float16 is unavailable on Intel Macs
   #expect(idx.vector(for: "k0") == vs[0].map { Float(Float16($0)) })
+  #endif
   try idx.save()
   let again = try VectorIndex(url: url, dimensions: 32, modelRevision: "r")
   for i in 0..<50 { #expect(again.vector(for: "k\(i)") == idx.vector(for: "k\(i)")) }
@@ -250,6 +252,54 @@ func invalidDimensionsThrowInsteadOfTrapping(_ d: Int) {
   }
 }
 
+// MARK: Bulk scoring
+
+@Suite struct DotAllTests {
+  func brute(_ a: [Float], _ b: [Float]) -> Float { zip(a, b).reduce(0) { $0 + $1.0 * $1.1 } }
+
+  @Test func matchesBruteForceInSlotOrderSkippingRemoved() throws {
+    let idx = try VectorIndex(url: tempURL(), dimensions: 16, modelRevision: "r")
+    var g = LCG(s: 5)
+    for i in 0..<40 { try idx.upsert(id: "v\(i)", vector: g.unitVector(16)) }
+    for i in [3, 17, 39] { try idx.remove(id: "v\(i)") }
+    try idx.upsert(id: "new", vector: g.unitVector(16))  // reuses a free slot
+    let queries = (0..<3).map { _ in g.unitVector(16) }
+    let r = idx.dotAll(queries)
+    #expect(r.queryCount == 3 && r.ids.count == idx.count && r.scores.count == 3 * idx.count)
+    #expect(Set(r.ids) == Set((0..<40).filter { ![3, 17, 39].contains($0) }.map { "v\($0)" } + ["new"]))
+    for (q, query) in queries.enumerated() {
+      let row = r.scores(forQuery: q)
+      #expect(row.count == r.ids.count)
+      for (j, id) in r.ids.enumerated() {
+        #expect(abs(row[row.startIndex + j] - brute(query, idx.vector(for: id)!)) < 1e-5, "\(q) \(id)")
+      }
+    }
+    // Agrees with search: the best id of each row is search's top hit.
+    for (q, query) in queries.enumerated() {
+      let row = Array(r.scores(forQuery: q))
+      let best = r.ids[row.indices.max { row[$0] < row[$1] }!]
+      #expect(idx.search(query, k: 1).first?.id == best)
+    }
+  }
+
+  @Test func emptyIndexAndNoQueries() throws {
+    let idx = try VectorIndex(url: tempURL(), dimensions: 8, modelRevision: "r")
+    #expect(idx.dotAll([[Float](repeating: 0.1, count: 8)]).scores.isEmpty)
+    try idx.upsert(id: "a", vector: [1, 0, 0, 0, 0, 0, 0, 0])
+    let none = idx.dotAll([])
+    #expect(none.queryCount == 0 && none.scores.isEmpty && none.ids == ["a"])
+  }
+
+  #if !DEBUG
+  @Test func unusableQueriesGiveNoScores() throws {
+    let idx = try VectorIndex(url: tempURL(), dimensions: 4, modelRevision: "r")
+    try idx.upsert(id: "a", vector: [1, 0, 0, 0])
+    #expect(idx.dotAll([[1, 0, 0]]).scores.isEmpty)
+    #expect(idx.dotAll([[.nan, 0, 0, 0]]).scores.isEmpty)
+  }
+  #endif
+}
+
 // MARK: Scale (serialized so their memory and timing do not disturb each other)
 
 @Suite(.serialized) struct ScaleTests {
@@ -281,6 +331,30 @@ func invalidDimensionsThrowInsteadOfTrapping(_ d: Int) {
     #expect(hits.first?.id == "v1234")
     #if !DEBUG
     #expect(median < 20)
+    #endif
+  }
+
+  /// 50k x 256 against 3 queries in one matrix product. 15 ms budget, enforced in release builds only.
+  @Test(.timeLimit(.minutes(5))) func perf50kDotAll() throws {
+    let idx = try VectorIndex(url: tempURL(), dimensions: 256, modelRevision: "perf")
+    idx.reserveCapacity(50_000)
+    var g = LCG(s: 7)
+    for i in 0..<50_000 { try idx.upsert(id: "v\(i)", vector: g.unitVector(256)) }
+    let queries = (0..<3).map { _ in g.unitVector(256) }
+    _ = idx.dotAll(queries)  // warm up
+    var times: [Double] = []
+    var r = idx.dotAll(queries)
+    for _ in 0..<20 {
+      let t0 = ContinuousClock.now
+      r = idx.dotAll(queries)
+      let d = ContinuousClock.now - t0
+      times.append(Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+    }
+    times.sort()
+    print("perf50kDotAll: median \(times[times.count / 2]) ms, min \(times[0]) ms")
+    #expect(r.scores.count == 150_000)
+    #if !DEBUG
+    #expect(times[times.count / 2] < 15)
     #endif
   }
 
