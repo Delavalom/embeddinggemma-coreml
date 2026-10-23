@@ -1,9 +1,18 @@
+# Copyright 2026 the HuggingFace Team. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Modified by Delavalom, 2026: extracted the minimal functions from transformers v5.20.2 (modeling_gemma4.py,
+# modeling_embedding_gemma2.py, image_processing_gemma4.py) into one test-only module; config lookups replaced by
+# arguments, attention called through eager_attention_forward directly; maths unchanged. See NOTICE.
+
 """Upstream reference maths, copied from vendor/reference (transformers v5.20.2, Apache-2.0). Tests only.
 
 The convert group has no transformers, so the minimal pure functions are copied here. Changes from upstream are
 plumbing only: config lookups became arguments, `attention_scaling` is 1.0 (what upstream sets for the 'default'
 and 'axial' rope types), and the attention classes call `eager_attention_forward` directly instead of going
 through ALL_ATTENTION_FUNCTIONS. Every function body that does maths is as upstream wrote it.
+
+Our additions: the `# --- <file>` section headers, the trailing comments naming each function's upstream source,
+and explanatory comments marked `# (added)`.
 """
 
 import torch
@@ -65,7 +74,7 @@ def apply_rotary_pos_emb_qk(q, k, cos, sin, unsqueeze_dim=1):  # modeling_embedd
 def patch_positions(patch_height, patch_width):
     patch_grid = torch.meshgrid(torch.arange(patch_width), torch.arange(patch_height), indexing="xy")
     stacked_grid = torch.stack(patch_grid, dim=-1)
-    return stacked_grid.reshape(patch_height * patch_width, 2)  # (x, y) per patch, row-major
+    return stacked_grid.reshape(patch_height * patch_width, 2)  # (added) (x, y) per patch, row-major
 
 
 # --- modeling_gemma4.py: vision RoPE --------------------------------------------------------------------------
@@ -77,7 +86,7 @@ def axial_inv_freq(base, dim):  # Gemma4VisionRotaryEmbedding.compute_axial_rope
 
 def recomposition_frequencies(freq):  # Gemma4VisionRotaryEmbedding.recomposition_frequencies
     # in contrast to other 2D rope modules, interleave grids as H-H-W-W
-    # (index 0 of the position ids is x, see image_processing_gemma4 Step 5, so "freq_h" holds the x angles)
+    # (added) index 0 of the position ids is x (image_processing_gemma4 Step 5), so "freq_h" holds the x angles
     freq_h, freq_w = freq[:, :, 0], freq[:, :, 1]
     return torch.cat([freq_h, freq_h, freq_w, freq_w], dim=-1)
 
