@@ -171,11 +171,15 @@ Swift resizes each photo into the closest bucket. s4's recall gate measures the 
 public actor EmbeddingGemma {
   public enum Source { case huggingFace(repo: String = EmbeddingGemma.defaultRepo, revision: String), file(URL) }
   public enum ImageBudget { case auto, tokens70, tokens280 }
-  public static func load(_ source: Source, budget: ImageBudget = .auto, dimensions: Int = 256) async throws -> EmbeddingGemma
-  public func embed(image: CGImage) async throws -> [Float]                     // normalized, `dimensions` long
+  public static func load(_ source: Source, budget: ImageBudget = .auto, dimensions: Int = 256,
+                          store: ModelStore = ModelStore(), computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+                          progress: (@Sendable (Double) -> Void)? = nil) async throws -> EmbeddingGemma  // dimensions 1...768
+  public func embed(image: CGImage, orientation: CGImagePropertyOrientation = .up) async throws -> [Float]  // normalized, `dimensions` long
   public func embed(query: String) async throws -> [Float]                      // adds the search-query prefix
   public func embed(text: String, task: EmbeddingTask = .document) async throws -> [Float]
-  public nonisolated var modelRevision: String { get }
+  public nonisolated let modelRevision: String   // HF commit SHA; "file-<sha256 prefix of files.json>" for .file
+  public nonisolated let imageBudget: Int         // 70 or 280
+  public nonisolated let dimensions: Int
 }
 /// EmbeddingIndex module. A reference type on purpose, and not Sendable: own it from one actor.
 public final class VectorIndex {
@@ -195,7 +199,7 @@ public final class VectorIndex {
 - **`defaultRepo`:** a constant set from `HF_REPO` in the `justfile`. The Hugging Face account is confirmed at s7, before the first upload.
 - **Index file (version 2):** little-endian header (magic, version, dims, count, modelRevision), padded so the FP16 block starts 16-byte aligned, then the FP16 vectors, then an id table (JSON). Memory-mapped on load and widened straight into the single in-memory `[Float]` buffer; saved by streaming chunks to a temp file and renaming; search uses `vDSP` / `BLAS` dot products. 50k × 256 must search in < 20 ms on an iPhone 12 (unit benchmark on macOS as a proxy, verified in s6).
 - **ModelStore:** the published folder is an uncompressed `EmbeddingGemma2.mlpackage/`, `tokenizer/` and `files.json` (`[{path, size, sha256}]`); there is no system unzip on iOS. Each file is a resumable `URLSession` download task (resume data kept on error or cancellation; a default session, not a background one, so it works in a library and in tests), checked against its size and SHA-256 from `files.json` at the same pinned revision, then the package is compiled into Application Support/EmbeddingGemma/<revision>/. The previous revision is kept until the new one is verified and compiled. `.file(URL)` takes a local folder with the same layout.
-- **Errors:** `EmbeddingGemmaError` with `.downloadFailed(underlying)`, `.checksumMismatch(file)`, `.unsupportedOS`, `.modelLoadFailed(underlying)`, `.revisionMismatch(expected, found)`, `.invalidImage`.
+- **Errors:** `EmbeddingGemmaError` with `.downloadFailed(underlying)`, `.checksumMismatch(file)`, `.unsupportedOS`, `.modelLoadFailed(underlying)`, `.revisionMismatch(expected, found)`, `.invalidImage`, `.invalidDimensions(n)`, `.contractViolation(detail)` (a model whose functions lack the section 7 inputs or outputs).
 - **Tests:** tokenizer parity (fixtures), preprocessing parity (fixtures), end-to-end parity on macOS against s4 artifacts (skipped with a clear message if artifacts are missing), index round-trip, revision mismatch, top-k correctness against brute force.
 
 ## 9. PhotoSearchDemo
