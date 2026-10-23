@@ -47,6 +47,13 @@ enum TestSupport {
 actor TokenizerCache {
   static let shared = TokenizerCache()
   private var done = Set<URL>()
+  private var sharedEncoder: Task<TextEncoder, any Error>?
+
+  /// One TextEncoder for all tests (loading the 32 MB tokenizer takes seconds in debug builds).
+  func encoder() async throws -> TextEncoder {
+    if sharedEncoder == nil { sharedEncoder = Task { try await TextEncoder(tokenizerFolder: TestSupport.tokenizerFolder()) } }
+    return try await sharedEncoder!.value
+  }
 
   func ensure(dir: URL, base: URL, files: [ManifestEntry]) async throws {
     if done.contains(dir) { return }
