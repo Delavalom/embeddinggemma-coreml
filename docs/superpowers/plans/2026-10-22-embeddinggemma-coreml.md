@@ -701,6 +701,8 @@ Note: `per_layer_config` is keyed by layer index strings (`"05"`, `"11"`, …) i
 
 ### Task 8: RoPE tables
 
+> **Implemented, then amended after review.** The code below is the original draft; `egcm/model/rope.py` and `tests/test_rope.py` are authoritative. `rope_1d` / `rope_2d` return `(cos, signed_sin)`: the `rotate_half` sign is folded into the sin table (exact), and `apply_rope_cf` splits with `chunk(2 * halves)` by a constant, so the traced graph has no shape-derived ints (coremltools 9.0 rejects them) and no `mul(-1)`. Pass the tables to `AttentionCF` unchanged.
+
 **Files:** create `egcm/model/rope.py`, `tests/test_rope.py`.
 
 - [ ] **Step 1: Write the failing test.** It compares against the upstream formulas, re-implemented inline in the test from `vendor/reference` (1-D: `rotate_half` with `cat(freqs, freqs)`; 2-D: the x half then the y half, each `rotate_half` within 32 channels).
@@ -783,7 +785,7 @@ def apply_rope_cf(x, cos, sin, halves: int):
 
 ### Task 9: ANE attention
 
-> **Implemented, then amended after review.** The code below is the original draft; `egcm/model/attention.py`, `egcm/model/masks.py`, `tests/test_attention.py` and `tests/upstream.py` are authoritative. The main change: the attention mask is additive and **key-major, `(1, S, 1, 1)`**, built by `egcm.model.masks.key_mask(valid)` from a `(1, S)` 0/1 tensor (or `None` for no padding). `AttentionCF` adds it to the `(1, S_k, 1, S_q)` logits directly, with no per-head transpose.
+> **Implemented, then amended after review.** The code below is the original draft; `egcm/model/attention.py`, `egcm/model/masks.py`, `tests/test_attention.py` and `tests/upstream.py` are authoritative. The main change: the attention mask is additive and **key-major, `(1, S, 1, 1)`**, built by `egcm.model.masks.key_mask(valid)` from a `(1, S)` 0/1 tensor (or `None` for no padding). `AttentionCF` adds it to the `(1, S_k, 1, S_q)` logits directly, with no per-head transpose. Heads are split with `chunk` by constructor constants (not `chunk(1)`, which coremltools cannot convert); attributes are `heads`, `kv_heads`, `head_dim`, `rope_halves`. `tests/test_convertible.py` converts the blocks (FP16, iOS18) and asserts every op prefers the Neural Engine.
 
 **Files:** create `egcm/model/attention.py`, `tests/test_attention.py`.
 
@@ -1094,6 +1096,8 @@ def test_every_needed_key_mapped_and_no_audio():
   vision_tower.encoder.layers.{i}.mlp.{gate,up,down}_proj.linear.weight
   embed_vision.embedding_projection.weight                   -> mm_proj
   ```
+
+  **Logit bound, checked at load time.** With `scaling = 1.0`, q and k leave their RMSNorms with rms 1 per head before the weights, so `|q·k| ≤ head_dim · max|q_norm.w| · max|k_norm.w|`. Assert that bound is ≤ 64 for every layer of both towers (google/embeddinggemma-2 measures about 32). A checkpoint above it could push logits past what the FP16 softmax and the `-1e4` mask margin are designed for; fail loudly instead of converting. Test it with a synthetic state dict on each side of the bound.
 
   If a key carries a `model.` prefix, strip it. If the key names differ from this list, `keys.json` is the authority: update this table in the plan and the code together. Load with `load_state_dict(strict=True)` on our module, so a missing or extra key fails loudly. Keys that exist in the HF weights but aren't used must all be audio keys (the test above).
 - [ ] **Step 3: Write `stages/s1_rewrite/run.py`** (`# group: convert`). It must:
