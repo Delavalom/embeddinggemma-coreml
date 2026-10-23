@@ -7,7 +7,7 @@ let package = Package(
     .library(name: "EmbeddingGemma", targets: ["EmbeddingGemma"]),
     .library(name: "EmbeddingIndex", targets: ["EmbeddingIndex"]),
   ],
-  dependencies: [.package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.5")],
+  dependencies: [.package(url: "https://github.com/huggingface/swift-transformers", .upToNextMinor(from: "1.3.5"))],
   targets: [
     .target(name: "EmbeddingGemma", dependencies: [.product(name: "Tokenizers", package: "swift-transformers")]),
     .target(name: "EmbeddingIndex"),

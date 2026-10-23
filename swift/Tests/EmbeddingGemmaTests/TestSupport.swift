@@ -22,6 +22,9 @@ enum TestSupport {
   static let fixturesDir = repoRoot.appending(path: "fixtures")
   static let testFixtures = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "Fixtures")
   static let s4Dir = repoRoot.appending(path: "artifacts/s4_compress")
+  /// `EGCM_REQUIRE_ARTIFACTS=1` (CI, Task 21): suites that normally skip without the contract model or s4 run
+  /// anyway and fail, so a missing artifact cannot pass silently.
+  static let requireArtifacts = ProcessInfo.processInfo.environment["EGCM_REQUIRE_ARTIFACTS"] == "1"
 
   /// The s4 model package, if stage 4 has run (`EmbeddingGemma2.mlpackage` if present, else the first
   /// `.mlpackage`). End-to-end tests are skipped without it.
@@ -96,8 +99,10 @@ struct PixelBudget: Decodable {
 struct PixelImage: Decodable { let id: String; let file: String; let height: Int; let width: Int
   let budgets: [String: PixelBudget] }
 struct SyntheticCase: Decodable { let height: Int; let width: Int; let budgets: [String: PixelBudget] }
+struct LargeCase: Decodable { let height: Int; let width: Int; let budget: Int; let bucket: String; let sha256: String }
 struct PixelFixtures: Decodable {
   let hf_revision: String; let samples: Int; let images: [PixelImage]; let synthetic: [SyntheticCase]
+  let large_synthetic: [LargeCase]
 }
 
 extension TestSupport {

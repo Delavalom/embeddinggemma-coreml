@@ -2,11 +2,14 @@ import Foundation
 
 /// Which image budget a device gets by default (`ImageBudget.auto`): 280 soft tokens on A17 Pro and newer iPhones
 /// and on Macs, 70 otherwise.
-public enum DeviceTier {
+///
+/// Deliberately simple (spec section 8): M-series iPads get 70 (only iPhones are mapped), and Intel Macs get 280
+/// although they have no Neural Engine (Core ML runs on the CPU/GPU there, slower). s6 measures the iPhone tiers.
+package enum DeviceTier {
   /// The first iPhone with an A17 Pro is iPhone16,1 (iPhone 15 Pro).
   static let firstFastIPhoneMajor = 16
 
-  public static func defaultBudget() -> Int {
+  package static func defaultBudget() -> Int {
     #if os(macOS)
       return budget(machine: machine(), isMac: true)
     #else

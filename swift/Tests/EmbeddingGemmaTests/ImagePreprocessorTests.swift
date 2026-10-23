@@ -55,6 +55,117 @@ func percentile(_ xs: [Float], _ q: Double) -> Float {
     }
   }
 
+  /// 9x to 12x downscales (12 MP at budget 70, extreme aspect ratios), bit-exact against torch (SHA-256 of the
+  /// whole output). 48 MP is checked by `perfLargeImages` in release builds.
+  @Test(arguments: [(3024, 4032, 70), (3024, 4032, 280), (5000, 1200, 70), (1080, 7000, 70)])
+  func largeDownscalesAreBitExact(h: Int, w: Int, budget: Int) throws {
+    let fx = try TestSupport.load(PixelFixtures.self, "pixels.json")
+    let ref = try #require(fx.large_synthetic.first { $0.height == h && $0.width == w && $0.budget == budget })
+    let out = try ImagePreprocessor(budget: budget).preprocess(try TestSupport.synthetic(height: h, width: w))
+    #expect(out.bucket.name.rawValue == ref.bucket)
+    #expect(SHA256.hash(data: out.interleavedRGB()).map { String(format: "%02x", $0) }.joined() == ref.sha256)
+  }
+
+  /// Non-premultiplied sRGB RGBA is read directly: alpha dropped, stored colours kept at every alpha, exactly as
+  /// PIL's convert("RGB"). Forced through the drawing path (premultiplied), colours survive within 8-bit rounding
+  /// and alpha 0 becomes black (ADR-0005).
+  @Test func alphaIsDroppedKeepingColours() throws {
+    func rgba(alpha: UInt8) throws -> CGImage {
+      var px = [UInt8]()
+      for _ in 0..<(96 * 96) { px += [200, 100, 50, alpha] }
+      let provider = try #require(CGDataProvider(data: Data(px) as CFData))
+      return try #require(CGImage(width: 96, height: 96, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 96 * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue), provider: provider,
+                                  decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+    }
+    let p = try ImagePreprocessor(budget: 70)
+    for (alpha, drawnTolerance) in [(UInt8(255), 0), (128, 2), (16, 16), (0, 255)] {
+      let direct = try p.preprocess(try rgba(alpha: alpha))
+      let drawn = try p.preprocess(try rgba(alpha: alpha), orientation: .up, read: .never)
+      let n = direct.bucket.height * direct.bucket.width
+      for (c, want) in [200, 100, 50].enumerated() {
+        #expect(Int(direct.planar[c * n + n / 2]) == want, "direct, alpha \(alpha) channel \(c)")
+        #expect(abs(Int(drawn.planar[c * n + n / 2]) - want) <= drawnTolerance, "drawn, alpha \(alpha) channel \(c)")
+      }
+    }
+    #expect(try p.preprocess(try rgba(alpha: 0), orientation: .up, read: .never).planar.allSatisfy { $0 == 0 })
+  }
+
+  /// For bitmaps in memory, the direct read and the drawing path give identical pixels in every layout the direct
+  /// path accepts (RGBX, XRGB, BGRX little-endian, packed RGB). Production only reads non-premultiplied alpha
+  /// directly (see ImagePreprocessor on ImageIO's two JPEG decodes).
+  @Test func directReadEqualsDrawing() throws {
+    let base = try TestSupport.synthetic(height: 300, width: 410)
+    let ctxs: [(CGImageAlphaInfo, CGBitmapInfo, Int)] = [
+      (.noneSkipLast, [], 32), (.noneSkipFirst, [], 32), (.noneSkipFirst, .byteOrder32Little, 32),
+      (.noneSkipLast, .byteOrder32Little, 32),
+    ]
+    let p = try ImagePreprocessor(budget: 70)
+    let want = try p.preprocess(base, orientation: .up, read: .never).planar
+    for (alpha, order, _) in ctxs {
+      let ctx = try #require(CGContext(data: nil, width: 410, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                       bitmapInfo: alpha.rawValue | order.rawValue))
+      ctx.draw(base, in: CGRect(x: 0, y: 0, width: 410, height: 300))
+      let img = try #require(ctx.makeImage())
+      #expect(RowProvider.directLayout(img) != nil, "\(alpha.rawValue) \(order.rawValue)")
+      #expect(try p.preprocess(img, orientation: .up, read: .whenPossible).planar == want, "\(alpha.rawValue) \(order.rawValue)")
+    }
+    // Packed 24-bit RGB.
+    let rgbx = try ImagePreprocessor.drawUpright(base, orientation: .up).rgbx
+    let rgb = Data(rgbx.enumerated().filter { $0.offset % 4 != 3 }.map(\.element))
+    let packed = try #require(CGImage(width: 410, height: 300, bitsPerComponent: 8, bitsPerPixel: 24, bytesPerRow: 410 * 3,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: [],
+                                      provider: CGDataProvider(data: rgb as CFData)!, decode: nil,
+                                      shouldInterpolate: false, intent: .defaultIntent))
+    #expect(RowProvider.directLayout(packed) != nil)
+    #expect(try p.preprocess(packed, orientation: .up, read: .whenPossible).planar == want)
+  }
+
+  /// Display P3 pixels are converted to sRGB (ADR-0005), not passed through as if they were sRGB.
+  @Test func displayP3IsConvertedToSRGB() throws {
+    var px = [UInt8]()
+    for _ in 0..<(96 * 96) { px += [200, 100, 50, 255] }
+    let ctx = try #require(CGContext(data: &px, width: 96, height: 96, bitsPerComponent: 8, bytesPerRow: 96 * 4,
+                                     space: CGColorSpace(name: CGColorSpace.displayP3)!,
+                                     bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+    let out = try ImagePreprocessor(budget: 70).preprocess(try #require(ctx.makeImage()))
+    let n = out.bucket.height * out.bucket.width
+    let rgb = (0..<3).map { Int(out.planar[$0 * n]) }
+    #expect(rgb[0] > 205 && rgb[1] < 100)  // P3 (200, 100, 50) is about sRGB (215, 95, 40)
+  }
+
+  /// Release only (`swift test -c release --filter perfLargeImages`): 12 MP and 48 MP, bit-exact, with timings.
+  @Test(.enabled(if: !_isDebugAssertConfiguration(), "release builds only"), .timeLimit(.minutes(5)))
+  func perfLargeImages() throws {
+    let fx = try TestSupport.load(PixelFixtures.self, "pixels.json")
+    for (h, w) in [(3024, 4032), (6048, 8064)] {
+      let img = try TestSupport.synthetic(height: h, width: w)
+      for budget in [70, 280] {
+        // EGCM_PERF_CASE=HxW@B runs one case, so each peak is measured in a fresh process.
+        if let only = ProcessInfo.processInfo.environment["EGCM_PERF_CASE"], only != "\(h)x\(w)@\(budget)" { continue }
+        let ref = try #require(fx.large_synthetic.first { $0.height == h && $0.width == w && $0.budget == budget })
+        var times: [Double] = []
+        var sha = ""
+        returnFreedMemoryToOS()
+        let base = physFootprint(), sampler = PeakSampler()
+        sampler.start()
+        for _ in 0..<5 {
+          let t0 = ContinuousClock.now
+          let out = try ImagePreprocessor(budget: budget).preprocess(img)
+          let d = ContinuousClock.now - t0
+          times.append(Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+          sha = SHA256.hash(data: out.interleavedRGB()).map { String(format: "%02x", $0) }.joined()
+        }
+        let extraMB = Double(sampler.stop() - base) / 1_048_576
+        #expect(sha == ref.sha256, "\(h)x\(w)@\(budget)")
+        print("perfLargeImages \(h)x\(w)@\(budget): min \(Int(times.min()!)) ms, runs \(times.map { Int($0) }), "
+              + "peak extra \(Int(extraMB)) MB")
+      }
+    }
+  }
+
   /// The fixture photos against s0. PNG decodes identically everywhere, so those are gated and must be bit-exact.
   /// JPEG decoding differs between ImageIO and PIL/libjpeg-turbo (chroma upsampling, IDCT), by up to ~48/255 per
   /// pixel at full size; after the resize that leaves p99 2/255 on these fixtures. That is recorded, not gated (the

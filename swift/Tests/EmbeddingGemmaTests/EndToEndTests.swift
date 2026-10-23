@@ -22,14 +22,15 @@ func cosine(_ a: [Float], _ b: [Float]) -> Float {
 
 /// The real model from s4 against s0's vectors, on the Neural Engine. Skipped until stage 4 has run.
 /// (Task 19's s5 stage runs the full fixture set; this is the unit-test sample.)
-@Suite(.enabled(if: TestSupport.s4Package != nil, "artifacts/s4_compress has no .mlpackage: run just stage 4"),
+@Suite(.enabled(if: TestSupport.s4Package != nil || TestSupport.requireArtifacts,
+                "artifacts/s4_compress has no .mlpackage: run just stage 4"),
        .serialized)
 struct EndToEndTests {
   static let minCosine: Float = 0.99  // [s5_swift].min_cosine
 
   @Test func textsMatchS0() async throws {
     let fx = try TestSupport.load(EmbeddingFixtures.self, "embeddings.json")
-    let folder = try await TestSupport.publish(package: TestSupport.s4Package!)
+    let folder = try await TestSupport.publish(package: try #require(TestSupport.s4Package))
     let m = try await EmbeddingGemma.load(.file(folder), dimensions: 768, store: ModelStore(root: TestSupport.tempDir()))
     for t in fx.texts {
       let v = t.kind == "query" ? try await m.embed(query: t.text) : try await m.embed(text: t.text, task: .document)
@@ -41,7 +42,7 @@ struct EndToEndTests {
   @Test(arguments: [70, 280])
   func imagesMatchS0(budget: Int) async throws {
     let fx = try TestSupport.load(EmbeddingFixtures.self, "embeddings.json")
-    let folder = try await TestSupport.publish(package: TestSupport.s4Package!)
+    let folder = try await TestSupport.publish(package: try #require(TestSupport.s4Package))
     let m = try await EmbeddingGemma.load(.file(folder), budget: budget == 70 ? .tokens70 : .tokens280, dimensions: 768,
                                           store: ModelStore(root: TestSupport.tempDir()))
     for img in fx.images {
