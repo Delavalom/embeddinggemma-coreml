@@ -66,3 +66,12 @@ def test_committed_synthetic_cases_cover_every_bucket():
     pixels = json.loads((ROOT / ex.OUT_DIR / "pixels.json").read_text())
     seen = {(b, e["bucket"]) for s in pixels["synthetic"] for b, e in s["budgets"].items()}
     assert len(seen) == 10
+
+
+def test_committed_embeddings_are_unit_vectors():
+    e = json.loads((ROOT / ex.OUT_DIR / "embeddings.json").read_text())
+    assert [t["id"] for t in e["texts"]] == list(ex.EMB_TEXTS)
+    vecs = [np.frombuffer(base64.b64decode(t["emb_b64"]), "<f4") for t in e["texts"]]
+    vecs += [np.frombuffer(base64.b64decode(v), "<f4") for i in e["images"] for v in i["budgets"].values()]
+    assert len(vecs) == len(ex.EMB_TEXTS) + 2 * len(ex.EMB_IMAGES)
+    assert all(v.shape == (768,) and abs(np.linalg.norm(v) - 1) < 1e-5 for v in vecs)

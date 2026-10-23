@@ -15,6 +15,9 @@ JPEG decoding differs between ImageIO and PIL (libjpeg-turbo), so the fixture JP
 any Swift resize (docs/decisions/ADR-0004-pixel-gate-inputs.md). The pixel gate is therefore taken on the
 decode-identical inputs (synthetic and PNG); the JPEG numbers are recorded.
 
+- `embeddings.json`: s0's normalized 768-d vectors (float32, base64) for `EMB_TEXTS` and, at both budgets,
+  `EMB_IMAGES` (bucket path): the end-to-end test's targets once s4 exists.
+
 The Swift test computes the 99th percentile of |swift - s0| over the samples, in 0-1 units, against
 `[s5_swift].max_pixel_abs_diff`. Committed files stay well under 2 MB.
 """
@@ -35,6 +38,8 @@ from egcm.paths import HF_REVISION, ROOT
 
 OUT_DIR = Path("swift/Tests/EmbeddingGemmaTests/Fixtures")
 SAMPLES = 8192
+EMB_TEXTS = ("t000", "t001", "t002", "t003", "t120", "t121", "t122", "t199")  # queries, documents, the longest
+EMB_IMAGES = ("i000", "i012", "i015", "i023", "i100", "i006")  # landscape, tall, square, wide, PNG tall, portrait
 SHAPES = ("tall", "portrait", "square", "landscape", "wide")
 # (height, width): every bucket at both budgets, downscale up to 6.75x, upscale (300x400, 100x2000 vertically),
 # and the 280 portrait bucket's own size (both passes skipped).
@@ -97,7 +102,30 @@ def image_entry(u8_hwc: np.ndarray, bucket: str, samples: int = SAMPLES) -> dict
             "sample_b64": base64.b64encode(chw[sample_indices(chw.size, samples)].tobytes()).decode()}
 
 
-def export(s0: Path, out: Path) -> tuple[Path, Path]:
+def b64_f32(v: np.ndarray) -> str:
+    return base64.b64encode(np.ascontiguousarray(v, dtype="<f4").tobytes()).decode()
+
+
+def export_embeddings(s0: Path, out: Path) -> Path:
+    kinds = {t["id"]: t for t in load_texts()}
+    with np.load(s0 / "texts.npz") as z:
+        order = list(z["order"])
+        texts = [{"id": k, "kind": kinds[k]["kind"], "text": kinds[k]["text"],
+                  "emb_b64": b64_f32(z["emb"][order.index(k)])} for k in EMB_TEXTS]
+    rows = {r["id"]: r for r in load_images()}
+    images = [{"id": i, "file": rows[i]["file"], "budgets": {}} for i in EMB_IMAGES]
+    for b in BUDGETS:
+        with np.load(s0 / f"images_{b}.npz") as z:
+            order = list(z["order"])
+            for e in images:
+                e["budgets"][str(b)] = b64_f32(z["emb_bucket"][order.index(e["id"])])
+    p = out / "embeddings.json"
+    p.write_text(json.dumps({"hf_revision": HF_REVISION, "texts": texts, "images": images}, indent=1,
+                            ensure_ascii=False) + "\n")
+    return p
+
+
+def export(s0: Path, out: Path) -> tuple[Path, ...]:
     out.mkdir(parents=True, exist_ok=True)
     texts = load_texts()
     with np.load(s0 / "texts.npz") as z:
@@ -134,7 +162,7 @@ def export(s0: Path, out: Path) -> tuple[Path, Path]:
     pixel_path.write_text(json.dumps({"hf_revision": HF_REVISION, "samples": SAMPLES,
                                       "sample_rule": "uint8 [3,H,W] flattened; index k -> (k * 3*H*W) // samples",
                                       "images": entries, "synthetic": synth}, indent=1) + "\n")
-    return text_path, pixel_path
+    return text_path, pixel_path, export_embeddings(s0, out)
 
 
 def main() -> None:

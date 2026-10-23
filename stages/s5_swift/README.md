@@ -33,12 +33,27 @@ Measured 2026-10-23 on the M1 Pro:
 | same | 2 PNG photos x 2 budgets | 0 | 0 | 4/4 |
 | same | 16 JPEG photos x 2 budgets (decoder included) | 2/255 | 31/255 | 0/32 |
 
+- `embeddings.json`: s0's normalized vectors for 8 texts and 6 images (both budgets), the targets of
+  `EndToEndTests` (cosine >= `[s5_swift].min_cosine`), which run once `artifacts/s4_compress/` has a package and
+  are skipped with "run just stage 4" until then.
+
 Rerun the export whenever s0 is rerun; `tests/test_s5_export.py` checks the files are present, current (same
 `HF_REVISION`), cover every bucket, and stay under 2 MB.
 
 The tokenizer (`tokenizer.json`, 32 MB) is over the 20 MB limit for git. Tests download it once from
 `google/embeddinggemma-2` at `HF_REVISION` into `artifacts/tokenizer/<revision>/` and verify its sha256; the app gets
 it from the published model folder through `ModelStore`.
+
+## Contract model
+
+`RuntimeTests` exercise the `EmbeddingGemma` actor on real Core ML before s4 exists, with a 52 KB stand-in that
+has every entry point and I/O of spec section 7 and computes a vector the test recomputes exactly:
+
+```
+uv run --exact --group convert python -m stages.s5_swift.make_contract_model   # artifacts/s5_swift/contract/
+```
+
+Without it the suite is skipped with that command as the message.
 
 ## Known failure modes
 
