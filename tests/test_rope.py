@@ -1,10 +1,19 @@
-"""RoPE tables against the upstream code copied into tests/upstream.py."""
+"""RoPE tables against the upstream code copied into tests/upstream.py.
+
+Our sin tables carry the rotate_half sign (see egcm/model/rope.py), so they are compared with upstream's sin after
+negating the first block of each rotated pair; the application tests compare final results, which is what matters.
+"""
 
 import pytest
 import torch
 import upstream as up
 
 from egcm.model.rope import apply_rope_cf, rope_1d, rope_2d
+
+
+def signed(sin, blocks):  # upstream (S, D) sin -> expected signed table: blocks with even index negated
+    parts = sin.chunk(blocks, dim=-1)
+    return torch.cat([-p if i % 2 == 0 else p for i, p in enumerate(parts)], -1)
 
 
 @pytest.mark.parametrize(("S", "D", "theta"), [(11, 256, 1e4), (290, 512, 1e6)])
@@ -17,7 +26,7 @@ def test_1d_matches_upstream(S, D, theta):
     cos, sin = rope_1d(S, D, theta)
     assert cos.shape == sin.shape == (1, D, 1, S)
     assert torch.allclose(cos.reshape(D, S).T, cos_ref[0], atol=1e-6)
-    assert torch.allclose(sin.reshape(D, S).T, sin_ref[0], atol=1e-6)
+    assert torch.allclose(sin.reshape(D, S).T, signed(sin_ref[0], 2), atol=1e-6)
     for x, ref in ((q, q_ref), (k, k_ref)):
         x_cf = x[0].permute(0, 2, 1).unsqueeze(2)  # (H, D, 1, S): one head per batch row
         out = apply_rope_cf(x_cf, cos, sin, halves=1)
@@ -36,7 +45,7 @@ def test_2d_matches_upstream(Hp, Wp):
     cos, sin = rope_2d(Hp, Wp, D, theta)
     assert cos.shape == sin.shape == (1, D, 1, Hp * Wp)
     assert torch.allclose(cos.reshape(D, -1).T, cos_ref[0], atol=1e-6)
-    assert torch.allclose(sin.reshape(D, -1).T, sin_ref[0], atol=1e-6)
+    assert torch.allclose(sin.reshape(D, -1).T, signed(sin_ref[0], 4), atol=1e-6)
     x_cf = x[0].permute(1, 2, 0).unsqueeze(2)  # (H, D, 1, S)
     out = apply_rope_cf(x_cf, cos, sin, halves=2)
     assert torch.allclose(out.squeeze(2).permute(2, 0, 1), ref[0], atol=1e-5)

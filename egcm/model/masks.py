@@ -11,6 +11,7 @@ def key_mask(valid: torch.Tensor) -> torch.Tensor:
     """valid: (1, S) float, 1 for real tokens and 0 for padding -> additive key-major mask (1, S, 1, 1).
 
     The mask is over keys only and broadcasts over queries, like upstream's bidirectional padding mask. Padded
-    query positions still produce outputs; pooling ignores them.
+    query positions still produce outputs; pooling ignores them. Batch is 1: `view(1, -1, 1, 1)` keeps shape ints
+    out of the traced graph.
     """
-    return ((1.0 - valid) * MASK_NEG).reshape(valid.shape[0], valid.shape[1], 1, 1)
+    return ((1.0 - valid) * MASK_NEG).view(1, -1, 1, 1)
