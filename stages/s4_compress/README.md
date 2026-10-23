@@ -1,0 +1,45 @@
+# s4_compress
+
+Compressed variants of the FP16 model (`egcm/compress.py`); keeps the smallest that passes every s4 gate as
+`artifacts/s4_compress/EmbeddingGemma2.mlpackage` (+ `.zip` and `checksums.json`).
+
+Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
+
+## What it does
+
+1. `egcm.parts.build(..., recipes=RECIPES)`: each function is converted to FP16 once, in its own process, and
+   every recipe compresses that model into its own part; each part is merged into its recipe's package in its own
+   process. coremltools 9 cannot compress multifunction models, so compression is per part and the merge
+   deduplicates. That needs the same weight to compress to the same bytes in every part, so recipes are linear
+   quantization only (k-means palettization needs scikit-learn or kmeans1d, which are not in the lock).
+2. For each variant, smallest first: contract check, zip (the download), compile, every fixture with `CPU_AND_NE`,
+   Neural Engine placement, latency. The first variant that passes every gate wins.
+3. Variants (`egcm.compress.RECIPES`): `int4b32` (int4, blocks of 32, table included), `int4b32_table8` (int4
+   weights, int8 per-channel table), `int8` (int8 per-channel everywhere).
+
+## Metrics
+
+- `min_cosine`: minimum over the 200 text vectors and the 400 bucketed image vectors, each against s0's vector for
+  the same input (`emb`, `emb_bucket`).
+- `min_recall_at_10`, `min_p5_spearman_top50`: the 120 app queries (`kind=query`) ranking the 200 images, at budget
+  70 and at 280 (the minimum of the two). The reference is s0's query vectors against s0's **exact-aspect** image
+  vectors (`emb_raw`, spec §5, ADR-0002); the new side is our package on the bucketed images. So the gate includes the
+  cost of bucketing. The same metrics against s0's bucketed vectors are recorded as `vs_bucket` (compression cost
+  alone); they are not gated.
+- `max_download_mb`: the zipped package.
+
+## Gate
+
+`gates.toml [s4_compress]`: `min_cosine >= 0.99`, `min_recall_at_10 >= 0.95`, `min_p5_spearman_top50 >= 0.9`,
+`max_download_mb <= 300`.
+
+## Known failure modes
+
+- **Bucketing alone fails the ranking gates (open, 2026-10-23).** s0's own vectors, bucketed vs exact-aspect, give
+  recall@10 0.855 (budget 70) / 0.877 (280) and p5 Spearman 0.22 / 0.67, and min cosine 0.916 / 0.893. Even images
+  whose aspect matches their bucket within 2% have cosines down to 0.916, because the processor's exact-aspect resize
+  uses a different resolution and token count than the bucket. So no compression recipe can pass the gates as defined,
+  and adding a few buckets would not close the gap. Resolving it needs a decision recorded in an ADR (the reference
+  set or the bucket design); gates are not changed without one.
+- **The merged package is about the sum of its parts**: deduplication failed (a recipe that is not deterministic).
+- **Download over 300 MB**: int8 everywhere is about 440 MB; the table alone is 134 MB at int8 and 67 MB at int4.

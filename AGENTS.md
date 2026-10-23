@@ -88,7 +88,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 ## Key facts
 
 - The model is rewritten in plain PyTorch in the Neural Engine layout (`(B, C, 1, S)`, 1x1 convs, per-head attention), loaded with Google's weights, then converted with `coremltools`. We do not trace Hugging Face's code.
-- The model card says BF16 or FP32 only, not FP16. FP16 overflow is the main risk in s3; `egcm/probe.py` (planned: Task 14) finds where.
+- The model card says BF16 or FP32 only, not FP16. FP16 overflow is the main risk in s3; `egcm/probe.py` records the FP32 activation ranges (s3).
 - Fixture pixels are sRGB. Downstream stages read s0's bucket images only through `egcm.fixtures.load_bucket_pixels(budget, image_id)` (`u8.astype(np.float32) * np.float32(1/255)`, `[1, 3, H, W]`).
 - Images use ten fixed shape buckets (budgets 70 and 280 x tall/portrait/square/landscape/wide). See `egcm/buckets.py` and `docs/decisions/ADR-0002-image-buckets.md`.
 - `vendor/reference/` holds read-only upstream copies, pinned in `SOURCE.txt`. Read them for ground truth on the architecture; never import them.
@@ -118,8 +118,10 @@ egcm/                     shared Python library
   functions.py            the spec §7 entry points: names, I/O contract (int32 mask), torch module per function
   convert.py              torch -> mlpackage, batched multifunction merge (weights stored once), contract check
   evaluate.py             runs every s0 fixture through a compiled package (s2-s4), latency
-  compress.py             int8 / palettize (planned: Task 15)
-  probe.py                activation max-abs probe (planned: Task 14)
+  parts.py                builds packages one process per part and per merge (16 GB Mac), resumable, memory/disk guards
+  compress.py             s4 recipes: deterministic linear quantization (int8 / int4 per block), table separately
+  probe.py                activation max-abs probe (s3, diagnostic)
+  placement.py            Neural Engine placement per function from MLComputePlan (s3, s4)
   fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)
 stages/sN_*/              README.md (input, output, gate, known failure modes) + run.py (planned: one per stage)
 scripts/                  package. gen_status.py now; gen_results.py, check_gates_adr.py, check_large_files.py (planned: Task 21)
