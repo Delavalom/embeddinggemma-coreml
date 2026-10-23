@@ -65,7 +65,7 @@ def run_stage(stage_key: str, fn: Callable[[Report], None], *, root: Path = ROOT
         write_report(r, d)
     except Exception as e:  # e.g. a detail that is not JSON-serializable
         r = Report(stage=stage_key, status="error", failures=[f"could not write report: {e!r}"],
-                   started_at=r.started_at, finished_at=_now(), git_sha=r.git_sha)  # fmt: skip
+                   started_at=r.started_at, finished_at=_now(), git_sha=r.git_sha)
         write_report(r, d)
     if not r.passed:
         raise SystemExit(1)

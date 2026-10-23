@@ -60,16 +60,16 @@ def aspect_preserving_size(height: int, width: int, budget: int) -> tuple[int, i
     max_patches = budget * POOL * POOL
     target_px = max_patches * PATCH * PATCH
     f = math.sqrt(target_px / (height * width))
-    th = int(math.floor(f * height / SIDE)) * SIDE
-    tw = int(math.floor(f * width / SIDE)) * SIDE
+    th = math.floor(f * height / SIDE) * SIDE
+    tw = math.floor(f * width / SIDE) * SIDE
     max_side = (max_patches // POOL**2) * SIDE
     # Upstream raises if both sides are 0 and if the result exceeds target_px. Neither can happen: the area is
     # about target_px (>= 161,280), so both sides cannot be below 48; floored sides give th * tw <= f^2 * h * w
     # = target_px; and the one-side-zero branches below give at most SIDE * max_side = target_px.
     if th == 0:
-        th, tw = SIDE, min(int(math.floor(width / height)) * SIDE, max_side)
+        th, tw = SIDE, min(math.floor(width / height) * SIDE, max_side)
     elif tw == 0:
-        tw, th = SIDE, min(int(math.floor(height / width)) * SIDE, max_side)
+        tw, th = SIDE, min(math.floor(height / width) * SIDE, max_side)
     return th, tw
 
 

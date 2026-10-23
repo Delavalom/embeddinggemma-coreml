@@ -116,4 +116,4 @@ def test_shape_mismatch_raises():
 def test_keyword_only():
     d = docs(np.arange(10) * 0.1)
     with pytest.raises(TypeError):
-        recall_at_k((Q, d), (Q, d), 3)  # noqa
+        recall_at_k((Q, d), (Q, d), 3)

@@ -21,7 +21,7 @@ def upstream_fn():
     fn = next(
         n for n in ast.parse(UPSTREAM.read_text()).body
         if isinstance(n, ast.FunctionDef) and n.name == "get_aspect_ratio_preserving_size"
-    )  # fmt: skip
+    )
     ns = {"math": math}
     exec(compile(ast.Module([fn], []), str(UPSTREAM), "exec"), ns)
     return ns[fn.name]

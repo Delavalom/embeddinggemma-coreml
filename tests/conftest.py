@@ -7,7 +7,7 @@ def git(root, *args):
     subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
         cwd=root, check=True, capture_output=True,
-    )  # fmt: skip
+    )
 
 
 @pytest.fixture

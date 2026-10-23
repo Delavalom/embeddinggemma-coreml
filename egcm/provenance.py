@@ -36,7 +36,7 @@ STAGE_INPUTS: dict[str, StageInputs] = {
     "s6_device": StageInputs(upstream=("s4_compress", "s5_swift")),
     "s7_publish": StageInputs(upstream=("s0_reference", "s1_rewrite", "s2_coreml_fp32", "s3_coreml_ane",
                                         "s4_compress", "s5_swift", "s6_device")),
-}  # fmt: skip
+}
 
 
 def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
@@ -81,7 +81,7 @@ def upstream_reports(stage: str, root: Path = ROOT) -> list[Report]:
     for up in sorted(STAGE_INPUTS[stage].upstream):
         p = root / "artifacts" / up / "report.json"
         if not p.is_file():
-            raise MissingInputError(f"{stage} needs {up}, but {p} does not exist; run `just stage` for it first")
+            raise MissingInputError(f"{stage} needs {up}, but {p} does not exist; run `just stage {up[1]}` first")
         out.append(read_report(p))
     return out
 

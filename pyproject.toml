@@ -12,7 +12,10 @@ dependencies = ["numpy>=2", "pydantic>=2.7", "safetensors>=0.4", "pillow>=11", "
 # https://github.com/apple/coremltools/releases/tag/9.0
 # Re-check when a newer coremltools is released.
 convert = ["torch==2.7.0", "coremltools==9.0", "pytest>=8"]
-# Used only by stage s0. transformers comes from git main for 5.18.0.dev0 support.
+# Used only by stage s0. transformers is installed from git main, and uv.lock pins the exact commit
+# (6b6792ff, version 5.21.0.dev0 when locked). The checkpoint was saved with 5.18.0.dev0. Released
+# versions from 5.19.0 on (5.20.2 on 2026-10-22) already contain EmbeddingGemma2, so s0 could use a
+# release instead; vendor/reference/SOURCE.txt records the commit the reference code was read from.
 reference = ["torch", "transformers @ git+https://github.com/huggingface/transformers@main", "sentence-transformers>=6.1", "torchvision", "pytest>=8"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
@@ -24,3 +27,10 @@ conflicts = [[{ group = "convert" }, { group = "reference" }]]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "RUF"]
