@@ -2,95 +2,118 @@ import Accelerate
 import Foundation
 
 public enum VectorIndexError: Error, Equatable {
+  /// The file on disk was written for a different model revision.
   case revisionMismatch(expected: String, found: String)
-  case dimensionMismatch(Int, Int)
+  case dimensionMismatch(expected: Int, found: Int)
+  /// `dimensions` must be in 1...65_535.
+  case invalidDimensions(Int)
+  case unsupportedVersion(UInt32)
   case corrupt
 }
 
-/// A flat, exact nearest-neighbour index over unit vectors (score = dot product).
+/// A flat, exact nearest-neighbour index (score = dot product).
 ///
-/// Vectors are stored as FP16 (the on-disk format) with a Float32 shadow that
-/// is kept in sync on every mutation, so `search` is one matrix-vector product
-/// plus a size-k heap. A value type: copies are independent (copy-on-write).
-public struct VectorIndex: Sendable {
+/// **Ownership.** This is a reference type that is deliberately *not* `Sendable`: the
+/// buffer is 50+ MB at 50k x 256, and a value type would copy it silently on the first
+/// mutation of any shared copy. Own it from a single actor (the app wraps it in one)
+/// and call it only from there.
+///
+/// **Storage.** One contiguous `[Float]` buffer. Values are rounded to FP16 precision
+/// on `upsert` (`Float(Float16(x))`), so what `search` and `vector(for:)` see is exactly
+/// what a save and reload gives back. Magnitudes above 65,504 overflow FP16: callers
+/// pass unit vectors (scores are only cosine similarities if they do).
+public final class VectorIndex {
   public let dimensions: Int
   public let modelRevision: String
 
   private let url: URL
-  private var half: [Float16] = []        // slotCount * dimensions
-  private var shadow: [Float] = []        // same values as `half`, widened
-  private var slotIDs: [String?] = []     // nil = free slot
-  private var slot: [String: Int] = [:]
+  private var buffer: [Float] = []         // slotCount * dimensions
+  private var idBySlot: [String?] = []     // nil = free slot
+  private var slotByID: [String: Int] = [:]
   private var freeSlots: [Int] = []
 
-  public var count: Int { slot.count }
+  private var slotCount: Int { idBySlot.count }
+
+  /// Number of live vectors.
+  public var count: Int { slotByID.count }
 
   /// Opens the index at `url`, or starts an empty one if no file exists yet.
   /// Throws `.revisionMismatch` if the file was written for another model revision.
   public init(url: URL, dimensions: Int, modelRevision: String) throws {
-    precondition(dimensions > 0, "dimensions must be positive")
+    guard (1...IndexFile.maxDimensions).contains(dimensions) else {
+      throw VectorIndexError.invalidDimensions(dimensions)
+    }
     self.url = url
     self.dimensions = dimensions
     self.modelRevision = modelRevision
     guard FileManager.default.fileExists(atPath: url.path) else { return }
 
-    let file = try IndexFile.read(url)
-    guard file.revision == modelRevision else {
-      throw VectorIndexError.revisionMismatch(expected: modelRevision, found: file.revision)
-    }
-    guard file.dimensions == dimensions else {
-      throw VectorIndexError.dimensionMismatch(dimensions, file.dimensions)
-    }
-    half = file.vectors
-    shadow = Self.widen(file.vectors)
-    slotIDs = file.ids
-    for (i, id) in file.ids.enumerated() { slot[id] = i }
+    let file = try IndexFile.read(url, expectedDimensions: dimensions, expectedRevision: modelRevision)
+    buffer = file.vectors
+    idBySlot = file.ids
+    slotByID.reserveCapacity(file.ids.count)
+    for (i, id) in file.ids.enumerated() { slotByID[id] = i }
   }
 
-  public mutating func upsert(id: String, vector: [Float]) throws {
-    guard vector.count == dimensions else { throw VectorIndexError.dimensionMismatch(dimensions, vector.count) }
+  /// Pre-sizes storage for `n` vectors, avoiding repeated growth while bulk loading.
+  public func reserveCapacity(_ n: Int) {
+    guard n > 0 else { return }
+    buffer.reserveCapacity(n * dimensions)
+    idBySlot.reserveCapacity(n)
+    slotByID.reserveCapacity(n)
+  }
+
+  public func upsert(id: String, vector: [Float]) throws {
+    guard vector.count == dimensions else {
+      throw VectorIndexError.dimensionMismatch(expected: dimensions, found: vector.count)
+    }
     let s: Int
-    if let existing = slot[id] {
+    if let existing = slotByID[id] {
       s = existing
     } else if let free = freeSlots.popLast() {
       s = free
     } else {
-      s = slotIDs.count
-      slotIDs.append(nil)
-      half.append(contentsOf: repeatElement(0, count: dimensions))
-      shadow.append(contentsOf: repeatElement(0, count: dimensions))
+      s = slotCount
+      idBySlot.append(nil)
+      buffer.append(contentsOf: repeatElement(0, count: dimensions))
     }
     let base = s * dimensions
-    for i in 0..<dimensions {
-      let h = Float16(vector[i])
-      half[base + i] = h
-      shadow[base + i] = Float(h)
-    }
-    slotIDs[s] = id
-    slot[id] = s
+    for i in 0..<dimensions { buffer[base + i] = Float(Float16(vector[i])) }
+    idBySlot[s] = id
+    slotByID[id] = s
   }
 
   /// Removes `id`; removing an unknown id is a no-op.
-  public mutating func remove(id: String) throws {
-    guard let s = slot.removeValue(forKey: id) else { return }
+  public func remove(id: String) throws {
+    guard let s = slotByID.removeValue(forKey: id) else { return }
     let base = s * dimensions
-    for i in 0..<dimensions { half[base + i] = 0; shadow[base + i] = 0 }
-    slotIDs[s] = nil
+    for i in 0..<dimensions { buffer[base + i] = 0 }
+    idBySlot[s] = nil
     freeSlots.append(s)
   }
 
   public func vector(for id: String) -> [Float]? {
-    guard let s = slot[id] else { return nil }
-    return Array(shadow[(s * dimensions)..<((s + 1) * dimensions)])
+    guard let s = slotByID[id] else { return nil }
+    return Array(buffer[(s * dimensions)..<((s + 1) * dimensions)])
   }
 
-  /// Top-`k` by dot product, best first. Returns `[]` if `query` has the wrong length.
+  /// Top-`k` by dot product, best first.
+  ///
+  /// - Returns `[]` when the index is empty, `k <= 0`, or `query` is unusable (wrong length
+  ///   or containing NaN/infinity). The last two are programmer errors and `assert` in debug builds.
+  /// - `k` larger than `count` (even `Int.max`) is fine.
+  /// - `filter` must be pure and cheap: it is called once per candidate that would
+  ///   enter the top `k`, in slot order.
+  /// - Equal scores are ordered by internal slot, which is stable within a session but is
+  ///   **not** preserved across `save()` and reload (slots are compacted).
   public func search(_ query: [Float], k: Int, filter: ((String) -> Bool)? = nil) -> [(id: String, score: Float)] {
-    let slots = slotIDs.count
-    guard k > 0, slots > 0, query.count == dimensions else { return [] }
+    assert(query.count == dimensions, "query has \(query.count) dimensions, index has \(dimensions)")
+    assert(query.allSatisfy(\.isFinite), "query contains NaN or infinity")
+    guard k > 0, count > 0, query.count == dimensions, query.allSatisfy(\.isFinite) else { return [] }
 
+    let slots = slotCount
     var scores = [Float](repeating: 0, count: slots)
-    shadow.withUnsafeBufferPointer { m in
+    buffer.withUnsafeBufferPointer { m in
       query.withUnsafeBufferPointer { q in
         scores.withUnsafeMutableBufferPointer { out in
           // (slots x dims) * (dims x 1) -> (slots x 1)
@@ -100,48 +123,27 @@ public struct VectorIndex: Sendable {
       }
     }
 
-    var heap = TopK(capacity: k)
+    var heap = TopK(capacity: min(k, count))
     for s in 0..<slots {
-      guard let id = slotIDs[s] else { continue }
+      guard let id = idBySlot[s] else { continue }
       let score = scores[s]
       guard heap.wouldAccept(score: score, slot: s) else { continue }
       if let filter, !filter(id) { continue }
       heap.insert(score: score, slot: s)
     }
-    return heap.sortedBestFirst().map { (id: slotIDs[$0.slot]!, score: $0.score) }
+    return heap.sortedBestFirst().map { (id: idBySlot[$0.slot]!, score: $0.score) }
   }
 
-  /// Writes the index atomically. Free slots are compacted away.
+  /// Streams the index to a temp file in the same directory, then renames it over `url`.
+  /// Free slots are compacted away.
   public func save() throws {
-    var vectors: [Float16] = []
-    var ids: [String] = []
-    vectors.reserveCapacity(count * dimensions)
-    ids.reserveCapacity(count)
-    for (s, id) in slotIDs.enumerated() {
-      guard let id else { continue }
-      ids.append(id)
-      vectors.append(contentsOf: half[(s * dimensions)..<((s + 1) * dimensions)])
-    }
-    try IndexFile.write(.init(dimensions: dimensions, revision: modelRevision, vectors: vectors, ids: ids), to: url)
-  }
-
-  private static func widen(_ h: [Float16]) -> [Float] {
-    guard !h.isEmpty else { return [] }
-    var src = h
-    var out = [Float](repeating: 0, count: h.count)
-    src.withUnsafeMutableBytes { s in
-      out.withUnsafeMutableBytes { d in
-        var sb = vImage_Buffer(data: s.baseAddress, height: 1, width: vImagePixelCount(h.count), rowBytes: h.count * 2)
-        var db = vImage_Buffer(data: d.baseAddress, height: 1, width: vImagePixelCount(h.count), rowBytes: h.count * 4)
-        vImageConvert_Planar16FtoPlanarF(&sb, &db, vImage_Flags(kvImageNoFlags))
-      }
-    }
-    return out
+    try IndexFile.write(to: url, dimensions: dimensions, revision: modelRevision,
+                        vectors: buffer, idBySlot: idBySlot)
   }
 }
 
 /// Fixed-capacity min-heap keeping the k best (score, slot) pairs.
-/// Ties on score prefer the lower slot, so results are deterministic.
+/// Ties on score prefer the lower slot, so results are deterministic within a session.
 private struct TopK {
   struct Entry { var score: Float; var slot: Int }
   let capacity: Int
