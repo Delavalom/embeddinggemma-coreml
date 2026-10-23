@@ -6,8 +6,9 @@ Each case is RMSNormCF -> AttentionCF (with key_mask) as one traced graph, for b
 - The placement check uses the real head layout (text sliding layer: hidden 512, 4 heads, 2 kv heads, head_dim 256;
   vision: hidden 768, head_dim 64, 4 of the 12 heads to keep it fast) at S = 64. Core ML places ops by cost, and
   below about that size it keeps a whole graph on the CPU even though every op is ANE-capable (measured on an
-  M1 Pro), so tiny dims say nothing about placement. Inputs and outputs are FP16 so no fp32 -> fp16 cast op sits on the CPU. The first ANE
-  compile of a new graph can take much longer on a loaded machine; later runs hit the system's compile cache.
+  M1 Pro), so tiny dims say nothing about placement. Inputs and outputs are FP16 so no fp32 -> fp16 cast op sits
+  on the CPU. The first ANE compile of a new graph can take much longer on a loaded machine; later runs hit the
+  system's compile cache.
 """
 
 import platform
