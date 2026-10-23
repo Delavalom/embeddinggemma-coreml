@@ -49,3 +49,20 @@ def test_committed_fixtures_are_small_and_current():
     assert texts["hf_revision"] == pixels["hf_revision"] == HF_REVISION
     assert len(texts["texts"]) == 200 and len(pixels["images"]) == 20
     assert sum(p.stat().st_size for p in d.iterdir()) < 2_000_000
+
+
+def test_synthetic_pattern_is_fixed():
+    img = ex.synthetic(40, 100)
+    assert img.shape == (40, 100, 3) and img.dtype == np.uint8
+    # region 0 (gradient), 1 (hash noise), 2 (checkerboard), spot-checked by hand
+    assert img[0, 0].tolist() == [0, 60, 120]
+    assert img[0, 37].tolist() == [(73856093 * 37 % 2**32) >> 24, ((73856093 * 37) ^ 83492791) % 2**32 >> 24,
+                                   ((73856093 * 37) ^ (2 * 83492791)) % 2**32 >> 24]
+    assert img[0, 80].tolist() == [0, 0, 0] and img[0, 85].tolist() == [255, 255, 255]  # x // 5 even, odd
+    assert set(ex.SYNTHETIC_SIZES) >= {(960, 672), (300, 400)}  # identity at 280, upscale at both budgets
+
+
+def test_committed_synthetic_cases_cover_every_bucket():
+    pixels = json.loads((ROOT / ex.OUT_DIR / "pixels.json").read_text())
+    seen = {(b, e["bucket"]) for s in pixels["synthetic"] for b, e in s["budgets"].items()}
+    assert len(seen) == 10

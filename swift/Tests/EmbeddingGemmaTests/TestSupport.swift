@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 @testable import EmbeddingGemma
 
@@ -73,11 +74,40 @@ struct PixelBudget: Decodable {
 }
 struct PixelImage: Decodable { let id: String; let file: String; let height: Int; let width: Int
   let budgets: [String: PixelBudget] }
-struct PixelFixtures: Decodable { let hf_revision: String; let samples: Int; let images: [PixelImage] }
+struct SyntheticCase: Decodable { let height: Int; let width: Int; let budgets: [String: PixelBudget] }
+struct PixelFixtures: Decodable {
+  let hf_revision: String; let samples: Int; let images: [PixelImage]; let synthetic: [SyntheticCase]
+}
 
 extension TestSupport {
   static func load<T: Decodable>(_ type: T.Type, _ name: String) throws -> T {
     try JSONDecoder().decode(T.self, from: Data(contentsOf: testFixtures.appending(path: name)))
+  }
+
+  /// The procedural test image of `export_fixtures.synthetic`, bit for bit: gradients, hash noise and a
+  /// checkerboard in 37x29 tiles, as an sRGB CGImage.
+  static func synthetic(height: Int, width: Int) throws -> CGImage {
+    var bytes = [UInt8](repeating: 255, count: width * height * 4)
+    bytes.withUnsafeMutableBufferPointer { b in
+      for y in 0..<height {
+        for x in 0..<width {
+          let (ux, uy) = (UInt32(x), UInt32(y))
+          let region = (x / 37 + y / 29) % 3
+          for c in 0..<3 {
+            let v: UInt32 = switch region {
+            case 0: UInt32((x + 2 * y + 60 * c) % 256)
+            case 1: ((ux &* 73_856_093) ^ (uy &* 19_349_663) ^ UInt32(c * 83_492_791)) >> 24
+            default: (x / 5 + y / 5) % 2 == 1 ? 255 : 0
+            }
+            b[(y * width + x) * 4 + c] = UInt8(v)
+          }
+        }
+      }
+    }
+    let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+    guard let image = ctx?.makeImage() else { throw EmbeddingGemmaError.invalidImage }
+    return image
   }
 
   /// `(k * n) // samples` for k < samples, as in stages/s5_swift/export_fixtures.py.

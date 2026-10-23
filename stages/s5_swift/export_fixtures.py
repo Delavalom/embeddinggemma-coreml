@@ -3,9 +3,17 @@
     uv run --exact --group convert python -m stages.s5_swift.export_fixtures [--s0 <artifacts/s0_reference>]
 
 - `text_ids.json`: s0's token ids for every fixture text (prompt, bos and eos included).
-- `pixels.json`: for 20 images (4 per bucket shape, PNG and JPEG) and both budgets, the bucket s0 chose and a
+- `pixels.json`, `images`: for 20 images (4 per bucket shape, PNG and JPEG) and both budgets, the bucket s0 chose and a
   deterministic sample of the bucket image s0 fed the model: the uint8 [3, H, W] tensor flattened, values at
   `sample_indices(3*H*W, SAMPLES)`, base64. Also the sha256 of the full uint8 HxWx3 image, to count exact matches.
+
+- `pixels.json`, `synthetic`: a fixed procedural pattern (`synthetic`, reproduced exactly in Swift) at
+  `SYNTHETIC_SIZES`, resized to its bucket at both budgets by torch's uint8 antialiased bicubic (the kernel s0 used,
+  which reproduces s0 bit for bit), sampled the same way. These are lossless inputs, so they test the resize alone.
+
+JPEG decoding differs between ImageIO and PIL (libjpeg-turbo), so the fixture JPEGs cannot match s0 to 1/255 in
+any Swift resize (docs/decisions/ADR-0004-pixel-gate-inputs.md). The pixel gate is therefore taken on the
+decode-identical inputs (synthetic and PNG); the JPEG numbers are recorded.
 
 The Swift test computes the 99th percentile of |swift - s0| over the samples, in 0-1 units, against
 `[s5_swift].max_pixel_abs_diff`. Committed files stay well under 2 MB.
@@ -28,6 +36,10 @@ from egcm.paths import HF_REVISION, ROOT
 OUT_DIR = Path("swift/Tests/EmbeddingGemmaTests/Fixtures")
 SAMPLES = 8192
 SHAPES = ("tall", "portrait", "square", "landscape", "wide")
+# (height, width): every bucket at both budgets, downscale up to 6.75x, upscale (300x400, 100x2000 vertically),
+# and the 280 portrait bucket's own size (both passes skipped).
+SYNTHETIC_SIZES = ((1000, 1500), (1500, 1000), (777, 777), (2000, 700), (650, 1900), (300, 400), (480, 900),
+                   (960, 672), (2268, 3024), (100, 2000))
 
 
 def sample_indices(n: int, samples: int) -> np.ndarray:
@@ -52,6 +64,29 @@ def pick_images(rows: list[dict], per_shape: int = 4) -> list[dict]:
         chosen += [r for r in of_shape if r not in chosen][: per_shape - len(chosen)]
         picked += sorted(chosen, key=rows.index)
     return picked
+
+
+def synthetic(height: int, width: int) -> np.ndarray:
+    """uint8 HxWx3: diagonal gradients, 32-bit hash noise and a 5 px checkerboard in 37x29 tiles. Integer-only, so
+    the Swift tests make the identical image (TestSupport.synthetic)."""
+    y, x = (a.astype(np.uint32) for a in np.mgrid[0:height, 0:width])
+    region = ((x // 37) + (y // 29)) % 3
+    check = np.where(((x // 5) + (y // 5)) % 2 == 1, 255, 0).astype(np.uint32)
+    out = np.empty((height, width, 3), np.uint8)
+    for c in range(3):
+        noise = ((x * np.uint32(73856093)) ^ (y * np.uint32(19349663)) ^ np.uint32(c * 83492791)) >> np.uint32(24)
+        grad = (x + 2 * y + 60 * c) % 256
+        out[..., c] = np.select([region == 0, region == 1], [grad, noise], check).astype(np.uint8)
+    return out
+
+
+def torch_resize(u8_hwc: np.ndarray, height: int, width: int) -> np.ndarray:
+    """torch's uint8 bicubic + antialias, the kernel torchvision's resize runs in s0."""
+    import torch
+
+    t = torch.from_numpy(np.ascontiguousarray(u8_hwc)).permute(2, 0, 1)[None]
+    r = torch.nn.functional.interpolate(t, size=(height, width), mode="bicubic", antialias=True)
+    return r[0].permute(1, 2, 0).contiguous().numpy()
 
 
 def image_entry(u8_hwc: np.ndarray, bucket: str, samples: int = SAMPLES) -> dict:
@@ -88,10 +123,17 @@ def export(s0: Path, out: Path) -> tuple[Path, Path]:
     finally:
         for z in npz.values():
             z.close()
+    synth = []
+    for h, w in SYNTHETIC_SIZES:
+        img, budgets = synthetic(h, w), {}
+        for b in BUDGETS:
+            bk = choose_bucket(h, w, b)
+            budgets[str(b)] = image_entry(torch_resize(img, bk.height, bk.width), bk.name)
+        synth.append({"height": h, "width": w, "budgets": budgets})
     pixel_path = out / "pixels.json"
     pixel_path.write_text(json.dumps({"hf_revision": HF_REVISION, "samples": SAMPLES,
                                       "sample_rule": "uint8 [3,H,W] flattened; index k -> (k * 3*H*W) // samples",
-                                      "images": entries}, indent=1) + "\n")
+                                      "images": entries, "synthetic": synth}, indent=1) + "\n")
     return text_path, pixel_path
 
 
