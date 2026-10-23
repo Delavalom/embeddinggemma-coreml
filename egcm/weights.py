@@ -1,7 +1,7 @@
 """google/embeddinggemma-2 safetensors -> the rewrite's modules, strict.
 
 Every Hugging Face key the rewrite uses maps to exactly one destination by one rule (`RULES`); linear weights become
-1x1 conv weights `(out, in) -> (out, in, 1, 1)`. The modules are created on the meta device and filled with
+1x1 conv weights `(out, in) -> (out, in, 1, 1)`, and the patch projection a 16x16 conv weight. The modules are created on the meta device and filled with
 `load_state_dict(strict=True, assign=True)`, so a missing or extra key raises and no weight is held twice. Keys
 `keys.json` lists that no rule uses must all belong to the audio tower (tests/test_weights_map.py).
 
@@ -28,8 +28,8 @@ from egcm.model.vision import VisionEncoder, VisionTower
 LOGIT_BOUND = 64.0
 TABLE_KEY = "language_model.embed_tokens.weight"
 
-# (tower, HF key pattern, destination template, transform). "conv": (out, in) -> (out, in, 1, 1); "copy": as is.
-# The patch projection is the one key with two destinations (see _patch).
+# (tower, HF key pattern, destination template, transform). "conv": (out, in) -> (out, in, 1, 1); "copy": as is;
+# "patch": the patch projection as a stride-16 conv weight (see _patch).
 _N = r"(?P<i>\d+)"
 RULES: tuple[tuple[str, str, str, str], ...] = (
     ("table", re.escape(TABLE_KEY), "", "copy"),
@@ -56,7 +56,7 @@ RULES: tuple[tuple[str, str, str, str], ...] = (
     ("text", rf"language_model\.layers\.{_N}\.layer_scalar", "layers.{i}.layer_scalar", "copy"),
     ("text", r"language_model\.norm\.weight", "norm.weight", "copy"),
     ("text", r"language_model\.embedding_projection\.weight", "out_proj.weight", "conv"),
-    ("vision", r"vision_tower\.patch_embedder\.input_proj\.weight", "patch", "patch"),
+    ("vision", r"vision_tower\.patch_embedder\.input_proj\.weight", "patch.weight", "patch"),
     ("vision", r"vision_tower\.patch_embedder\.position_embedding_table", "pos_table", "copy"),
     ("vision", rf"vision_tower\.encoder\.layers\.{_N}\.self_attn\.(?P<p>[qkvo])_proj\.linear\.weight",
      "layers.{i}.attn.{p}.weight", "conv"),
@@ -107,11 +107,9 @@ def load_hf(snapshot: Path) -> dict[str, torch.Tensor]:
     return out
 
 
-def _patch(w: torch.Tensor, patch: int) -> dict[str, torch.Tensor]:
-    """input_proj (C, p*p*3), input index (py, px, c) -> conv weight (C, 3, p, p) and bias, folding 2 * (x - 0.5)."""
-    c = w.shape[0]
-    return {"patch.weight": w.view(c, patch, patch, 3).permute(0, 3, 1, 2).contiguous() * 2,
-            "patch.bias": -w.sum(1)}
+def _patch(w: torch.Tensor, patch: int) -> torch.Tensor:
+    """input_proj (C, p*p*3), input index (py, px, c) -> conv weight (C, 3, p, p). The model applies 2 * (x - 0.5)."""
+    return w.view(w.shape[0], patch, patch, 3).permute(0, 3, 1, 2).contiguous()
 
 
 def tower_state_dict(sd: dict[str, torch.Tensor], tower: str, patch: int = 16) -> dict[str, torch.Tensor]:
@@ -122,10 +120,7 @@ def tower_state_dict(sd: dict[str, torch.Tensor], tower: str, patch: int = 16) -
         if d is None or d[0] != tower:
             continue
         _, name, how = d
-        if how == "patch":
-            out |= _patch(t, patch)
-        else:
-            out[name] = t[:, :, None, None] if how == "conv" else t
+        out[name] = _patch(t, patch) if how == "patch" else t[:, :, None, None] if how == "conv" else t
     return out
 
 

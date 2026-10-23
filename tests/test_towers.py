@@ -76,7 +76,7 @@ def test_image_embedding_matches_upstream(models):
     close(image_emb.vision(pixels)[0, :, 0].T, soft[0])
 
 
-def test_patch_embedding_folds_the_rescale(models):
+def test_patch_embedding_matches_upstream(models):
     (_, vision, _), _, (_, image_emb, _) = models
     torch.manual_seed(2)
     pixels = torch.rand(1, 3, tiny.BUCKET.height, tiny.BUCKET.width)
@@ -84,7 +84,7 @@ def test_patch_embedding_folds_the_rescale(models):
     patches = ut.convert_image_to_patches(pixels[0], tiny.VISION.patch)[None]
     pos = up.patch_positions(v.hp, v.wp)[None]
     want = vision.patch_embedder(patches, pos, torch.zeros(1, v.patches, dtype=torch.bool))[0]
-    close(v.embed(pixels)[0, :, 0].T, want)
+    close(v.embed(pixels)[0, :, 0].T, want, rel=1e-6)
 
 
 def test_padded_keys_do_not_change_valid_tokens(models):
