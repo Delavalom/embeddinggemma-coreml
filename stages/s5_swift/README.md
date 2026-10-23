@@ -37,6 +37,16 @@ Measured 2026-10-23 on the M1 Pro:
   `EndToEndTests` (cosine >= `[s5_swift].min_cosine`), which run once `artifacts/s4_compress/` has a package and
   are skipped with "run just stage 4" until then.
 
+- `pixels.json`, `large_synthetic`: 9x to 18x downscales (12 MP, 48 MP, 5000x1200, 1080x7000), SHA-256 only;
+  48 MP is checked by the release perf test (`swift test -c release --filter perfLargeImages`).
+- `truncation_ids.json`: 10 texts of 400 to 2,800 tokens, truncated by the reference tokenizer
+  (`uv run --exact --group reference python -m stages.s5_swift.export_truncation --s0 ...`); it first checks the
+  reference tokenizer reproduces s0's ids for all 200 fixture texts.
+
+**Regenerate on arm64 (Apple silicon).** torch has two uint8 antialiased bicubic kernels: an AVX2 one on x86 and the
+generic separable one elsewhere. s0 ran on arm64, so its pixels come from the generic kernel, which is what
+`Resampler.swift` ports bit for bit. Exporting on an x86 machine would produce AVX2 outputs that can differ.
+
 Rerun the export whenever s0 is rerun; `tests/test_s5_export.py` checks the files are present, current (same
 `HF_REVISION`), cover every bucket, and stay under 2 MB.
 
@@ -53,7 +63,9 @@ has every entry point and I/O of spec section 7 and computes a vector the test r
 uv run --exact --group convert python -m stages.s5_swift.make_contract_model   # artifacts/s5_swift/contract/
 ```
 
-Without it the suite is skipped with that command as the message.
+Three extra functions (`test_nan_text_16`, `test_fp16_text_16`, `test_4d_text_16`) cover NaN outputs
+(`.nonFiniteOutput`), FP16 outputs and a `[1, 768, 1, 1]` output. Without the package the suite is skipped with that
+command as the message; with `EGCM_REQUIRE_ARTIFACTS=1` (CI) it fails instead.
 
 ## Known failure modes
 

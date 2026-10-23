@@ -1319,6 +1319,9 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
   - pixel samples against the same samples of the reference pixels → `max_pixel_abs_diff` as the 99th percentile, **over decode-identical inputs only** (ADR-0004): the PNG fixtures against s0, plus the synthetic images of `export_fixtures.py` against torch's uint8 resize. The JPEG fixtures' decode-inclusive p99 goes to `details.jpeg_pixel_p99`, not gated;
   - embeddings against s0 → `min_cosine` (minimum over text and image vectors combined).
 
+  - **padding invariance** (recorded in `details`, review fix): for a sample of short texts, the embedding from `embed_text_16` and the same ids padded to 32 (and 64, 128) through the longer functions; record the minimum cosine. It must be ≥ 0.9999 (the mask must make padding invisible); a lower number means the mask is not applied somewhere and is a bug, not a tolerance;
+  - **truncation**: the >128-token texts of `swift/Tests/EmbeddingGemmaTests/Fixtures/truncation_ids.json` (from `export_truncation.py`, the reference tokenizer) are already gated id-for-id in the Swift unit tests.
+
   `token_ids_identical = true` is already in `[s5_swift]` (ADR-0003). Report via `run_stage("s5_swift", fill)`.
 - [ ] **Step 3: Run it.** `just stage 5`. Expected: pass.
 - [ ] **Step 4: Commit.** `git commit -am "feat(s5): swift end-to-end parity"`
@@ -1329,6 +1332,9 @@ func rand(_ n: Int, _ d: Int, seed: UInt64) -> [[Float]] {
 
 - [ ] **Step 1: `project.yml`** (XcodeGen). App target `PhotoSearchDemo`, iOS 18, bundle `com.delavalom.egcm.demo`. The package dependency is a local path `../../swift`. The `NSPhotoLibraryUsageDescription` string is "Search your photos on-device." `DEVELOPMENT_TEAM` is read from the `asc`-configured team: look it up with `asc` (team id) and write it to `Examples/PhotoSearchDemo/Team.xcconfig`, which is gitignored.
 - [ ] **Step 2: The app.**
+  - **Notes from the Swift review (2026-10-23):**
+    - Record peak RSS with **all 9 functions loaded** at the device's budget (`prewarm()`: 4 text + 5 image), as well as after lazy loading, and the RSS drop after `unloadFunctions()`.
+    - **Pre-downsampling huge sources is a measured decision for s6:** today a 48 MP photo costs about 250 MB of transient memory in `ImagePreprocessor` (one full-resolution sRGB copy is needed to draw it) and ~115 ms on an M1 Pro. Measure decoding with `CGImageSourceCreateThumbnailAtIndex` (`kCGImageSourceThumbnailMaxPixelSize` ≈ 2× the bucket's long side, `kCGImageSourceCreateThumbnailWithTransform`) against the full decode: RSS, ms per image, and the cosine to s0 on the fixture photos. Adopt it (with an ADR) only if the cosine stays ≥ 0.99. The demo's `PHImageManager` 960 px thumbnails already avoid the problem.
   - Permission → index the newest 1,000 images (thumbnail 960 px via `PHImageManager`) → `EmbeddingIndex` → search field → 3-column grid of results.
   - `BenchmarkRunner` (launch arg `-benchmark`) indexes 1,000 images at budget 70, then 200 at 280. It measures per-image ms (median, p90), query ms, peak RSS (`task_info` `phys_footprint` sampled every 100 ms), `ProcessInfo.thermalState` at the end, and the device model. It writes `Documents/s6_device.json` and shows "DONE".
 - [ ] **Step 3: `stages/s6_device/run.py`** (`# group: convert`).
@@ -1361,6 +1367,7 @@ def test_gates_change_needs_adr():
   - `gen_results.py` writes `docs/RESULTS.md` from the reports, including every s4 variant.
   - `check_large_files.py` fails on any tracked file over 5 MB, except `fixtures/images/*` (each ≤ 2 MB is enforced instead).
 - [ ] **Step 3: Write `ci.yml`.** On `pull_request` and push to main, run on `macos-latest`: checkout → `astral-sh/setup-uv` → `uv sync --group convert` → `uv run pytest -q` → `uv run python -m scripts.check_gates_adr` → `uv run python -m scripts.check_large_files` → `uv run --group dev ruff check .` → `uv run python -c "from egcm.fixtures import verify_manifest as v; assert v()==[]"` → `cd swift && swift build && swift test`.
+  - **`EGCM_REQUIRE_ARTIFACTS=1`** in the macOS job that has the artifacts (the contract model from `python -m stages.s5_swift.make_contract_model`, and s4 once it exists): the Swift suites that otherwise skip without them (`RuntimeTests`, `EndToEndTests`) then run and fail if the artifact is missing. Jobs without artifacts leave it unset. Also build for Intel: `swift build --arch x86_64`.
 - [ ] **Step 4: Run it.** `uv run --group convert pytest -q && just status`. Expected: PASS, and STATUS.md shows every stage.
 - [ ] **Step 5: Commit.** `git commit -am "chore: status/results generation, gates-ADR CI check"`
 
@@ -1373,7 +1380,7 @@ def test_gates_change_needs_adr():
   2. Read `HF_REPO_TARGET` from the environment and exit with a message if it's unset.
   3. Create the HF model repo (public) via `huggingface_hub.create_repo(exist_ok=True)`.
   4. Upload the uncompressed `EmbeddingGemma2.mlpackage/` directory plus `files.json` (a JSON array of `{"path", "size", "sha256"}` for every other file, sorted by path; the same format as `FilesManifest.write` in Swift), `tokenizer/tokenizer.json` and `tokenizer/tokenizer_config.json` from `HF_REVISION`, a README model card (base model, license Apache-2.0, parity table from RESULTS.md, usage via the Swift package) and `NOTICE`.
-  5. Record the resulting commit SHA as `revision` and rewrite `swift/Sources/EmbeddingGemma/DefaultModel.swift` (it exists from Task 17 with placeholder values): `public extension EmbeddingGemma { static let defaultRepo = "<target>"; static let defaultRevision = "<sha>" }`.
+  5. Record the resulting commit SHA as `revision` and rewrite `swift/Sources/EmbeddingGemma/DefaultModel.swift` (it exists from Task 17 with placeholder values): `public extension EmbeddingGemma { static let defaultRepo = "<target>"; static let defaultRevision = "<sha>"; static let defaultFilesManifestSHA256: String? = "<sha256 of the uploaded files.json>" }`. s7 writes the files.json hash too: loading the default model verifies files.json against it, on top of the pinned commit.
   6. `git tag v1.0.0`, `gh repo edit --visibility public --accept-visibility-change-consequences`, push the tags, and `gh release create v1.0.0 --notes-file docs/RESULTS.md`.
 - [ ] **Step 2: Don't run it in this plan.** It runs after the founder approves with the final numbers. The HF token comes from the founder via a secure prompt (`request_secret`) or their logged-in `hf` CLI.
 - [ ] **Step 3: Commit.** `git commit -am "feat(s7): guarded publish"`
