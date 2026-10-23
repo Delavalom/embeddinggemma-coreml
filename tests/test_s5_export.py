@@ -75,3 +75,10 @@ def test_committed_embeddings_are_unit_vectors():
     vecs += [np.frombuffer(base64.b64decode(v), "<f4") for i in e["images"] for v in i["budgets"].values()]
     assert len(vecs) == len(ex.EMB_TEXTS) + 2 * len(ex.EMB_IMAGES)
     assert all(v.shape == (768,) and abs(np.linalg.norm(v) - 1) < 1e-5 for v in vecs)
+
+
+def test_large_synthetic_cases_are_big_downscales():
+    pixels = json.loads((ROOT / ex.OUT_DIR / "pixels.json").read_text())
+    cases = pixels["large_synthetic"]
+    assert {(c["height"], c["width"], c["budget"]) for c in cases} >= {(3024, 4032, 70), (6048, 8064, 70)}
+    assert all(len(c["sha256"]) == 64 for c in cases)

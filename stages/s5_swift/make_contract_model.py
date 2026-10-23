@@ -10,6 +10,9 @@ vector, `features @ W` with W[k, d] = sin((k + 1) * (d + 1) / 100):
 - text: features = [sum(ids * mask) / 1e5, sum(mask) / 128, L / 128, 1]
 - image: features = [mean R, mean G, mean B, H / 1000]
 
+Three extra functions with text_16 inputs test output handling: `test_nan_text_16` (all NaN),
+`test_fp16_text_16` (the text vector as FP16) and `test_4d_text_16` (the text vector shaped [1, 768, 1, 1]).
+
 swift/Tests/EmbeddingGemmaTests/RuntimeTests.swift recomputes them (it skips when the package is missing). Not a
 model of anything; a few KB.
 """
@@ -34,7 +37,7 @@ W = np.stack([np.sin((k + 1) * (np.arange(768) + 1) / 100) for k in range(4)]).a
 TARGET = ct.target.macOS15
 
 
-def text_program(length: int):
+def text_program(length: int, variant: str = ""):
     @mb.program(input_specs=[mb.TensorSpec((1, length), dtype=types.int32),
                              mb.TensorSpec((1, length), dtype=types.int32)], opset_version=TARGET)
     def prog(input_ids, attention_mask):
@@ -43,7 +46,14 @@ def text_program(length: int):
         n = mb.mul(x=mb.reduce_sum(x=m, axes=[1], keep_dims=True), y=np.float32(1 / 128))
         const = np.array([[length / 128, 1.0]], np.float32)
         feats = mb.concat(values=[s, n, const], axis=1)
-        return mb.matmul(x=feats, y=W, name="embedding")
+        if not variant:
+            return mb.matmul(x=feats, y=W, name="embedding")
+        emb = mb.matmul(x=feats, y=W)
+        if variant == "nan":
+            return mb.mul(x=emb, y=np.float32(np.nan), name="embedding")
+        if variant == "fp16":
+            return mb.cast(x=emb, dtype="fp16", name="embedding")
+        return mb.reshape(x=emb, shape=[1, 768, 1, 1], name="embedding")
 
     return prog
 
@@ -61,6 +71,7 @@ def image_program(height: int, width: int):
 def main() -> None:
     programs = {f"embed_text_{n}": text_program(n) for n in TEXT_LENGTHS}
     programs |= {b.function_name: image_program(b.height, b.width) for b in BUCKETS}
+    programs |= {f"test_{v}_text_16": text_program(16, v) for v in ("nan", "fp16", "4d")}
     with tempfile.TemporaryDirectory() as tmp:
         desc = ct.utils.MultiFunctionDescriptor()
         for name, prog in programs.items():

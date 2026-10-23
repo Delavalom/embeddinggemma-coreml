@@ -645,5 +645,49 @@
     }
    }
   }
+ ],
+ "large_synthetic": [
+  {
+   "height": 3024,
+   "width": 4032,
+   "budget": 70,
+   "bucket": "landscape",
+   "sha256": "8ae8a1fc2974e9a98aab44267f655716535b0395c0f14dccc60754151515a065"
+  },
+  {
+   "height": 3024,
+   "width": 4032,
+   "budget": 280,
+   "bucket": "landscape",
+   "sha256": "0b7c139b3fab26627edcd3f21f879931f852de7e0d9ac0886ef7471436ef68db"
+  },
+  {
+   "height": 5000,
+   "width": 1200,
+   "budget": 70,
+   "bucket": "tall",
+   "sha256": "4c3a485ab3add608fa057b84de0817b23d8df91811318d0f2160dda5da3dc2c2"
+  },
+  {
+   "height": 1080,
+   "width": 7000,
+   "budget": 70,
+   "bucket": "wide",
+   "sha256": "dbbbee5c4197aebd429cc84ffa2efb74cf5d31de2f7f1f4b8c4a2e745552f949"
+  },
+  {
+   "height": 6048,
+   "width": 8064,
+   "budget": 70,
+   "bucket": "landscape",
+   "sha256": "b16447541289d19f8b6b8e1e2f1e252bf9048d465b70d4c1170342c5910b49fa"
+  },
+  {
+   "height": 6048,
+   "width": 8064,
+   "budget": 280,
+   "bucket": "landscape",
+   "sha256": "12fb67b5f5075580ea8440dc40dd5e8e5087ceefdac724e0b1425bf489b53ffe"
+  }
  ]
 }

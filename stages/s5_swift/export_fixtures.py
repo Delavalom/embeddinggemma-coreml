@@ -15,6 +15,8 @@ JPEG decoding differs between ImageIO and PIL (libjpeg-turbo), so the fixture JP
 any Swift resize (docs/decisions/ADR-0004-pixel-gate-inputs.md). The pixel gate is therefore taken on the
 decode-identical inputs (synthetic and PNG); the JPEG numbers are recorded.
 
+- `pixels.json`, `large_synthetic`: the same pattern at photo sizes (12 MP, 48 MP, extreme aspect ratios; 9x to
+  18x downscales), SHA-256 of torch's uint8 output only, so the files stay small.
 - `embeddings.json`: s0's normalized 768-d vectors (float32, base64) for `EMB_TEXTS` and, at both budgets,
   `EMB_IMAGES` (bucket path): the end-to-end test's targets once s4 exists.
 
@@ -45,6 +47,8 @@ SHAPES = ("tall", "portrait", "square", "landscape", "wide")
 # and the 280 portrait bucket's own size (both passes skipped).
 SYNTHETIC_SIZES = ((1000, 1500), (1500, 1000), (777, 777), (2000, 700), (650, 1900), (300, 400), (480, 900),
                    (960, 672), (2268, 3024), (100, 2000))
+# (height, width, budgets): large downscales, SHA only. 48 MP is checked by the release perf test.
+LARGE_SYNTHETIC = ((3024, 4032, (70, 280)), (5000, 1200, (70,)), (1080, 7000, (70,)), (6048, 8064, (70, 280)))
 
 
 def sample_indices(n: int, samples: int) -> np.ndarray:
@@ -158,10 +162,19 @@ def export(s0: Path, out: Path) -> tuple[Path, ...]:
             bk = choose_bucket(h, w, b)
             budgets[str(b)] = image_entry(torch_resize(img, bk.height, bk.width), bk.name)
         synth.append({"height": h, "width": w, "budgets": budgets})
+    large = []
+    for h, w, budgets in LARGE_SYNTHETIC:
+        img = synthetic(h, w)
+        for b in budgets:
+            bk = choose_bucket(h, w, b)
+            r = torch_resize(img, bk.height, bk.width)
+            large.append({"height": h, "width": w, "budget": b, "bucket": bk.name,
+                          "sha256": hashlib.sha256(np.ascontiguousarray(r).tobytes()).hexdigest()})
     pixel_path = out / "pixels.json"
     pixel_path.write_text(json.dumps({"hf_revision": HF_REVISION, "samples": SAMPLES,
                                       "sample_rule": "uint8 [3,H,W] flattened; index k -> (k * 3*H*W) // samples",
-                                      "images": entries, "synthetic": synth}, indent=1) + "\n")
+                                      "images": entries, "synthetic": synth,
+                                      "large_synthetic": large}, indent=1) + "\n")
     return text_path, pixel_path, export_embeddings(s0, out)
 
 
