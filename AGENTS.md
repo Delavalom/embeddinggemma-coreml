@@ -33,8 +33,8 @@ just stage <N>         # run stage N, write its report, exit non-zero on fail
 just all               # stages 0–5 in order, stop at the first failure
 just test              # pytest, plus swift test (first run downloads the 32 MB tokenizer into artifacts/tokenizer/)
 just lint              # ruff check
-just bench-device      # run the s6 benchmark on the connected iPhone (planned: Task 20)
-just publish           # s7. Refuses to run unless s0–s6 pass AND --confirm is given (planned: Task 22)
+just bench-device      # run the s6 benchmark on the connected iPhone (bundles the s4 model into the demo)
+just publish           # s7. Refuses unless --confirm, HF_REPO_TARGET, and s0–s6 passed and current. Never run it without founder approval
 ```
 
 `just stage N` needs `stages/sN_*/run.py` (s0 exists; the rest are planned, one per stage). Line 1 of each `run.py` is `# group: convert` or `# group: reference`; the recipe runs it with `uv run --exact --group <that group>`, then regenerates `STATUS.md` and keeps the stage's exit code.
@@ -123,6 +123,7 @@ egcm/                     shared Python library
   probe.py                activation max-abs probe (s3, diagnostic)
   placement.py            Neural Engine placement per function from MLComputePlan (s3, s4)
   fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)
+  published.py            the published model folder (files.json + mlpackage + tokenizer): s6 bundles it, s7 uploads it
 stages/sN_*/              README.md (input, output, gate, known failure modes) + run.py (planned: one per stage)
 scripts/                  package. gen_status.py now; gen_results.py, check_gates_adr.py, check_large_files.py (planned: Task 21)
 tests/                    pytest unit tests for the Python library
@@ -131,7 +132,7 @@ swift/                    SwiftPM package (Package.swift here). EmbeddingGemma: 
                           (torch uint8 AA bicubic port), TextEncoder, ModelStore (files.json, SHA-256, compile),
                           DeviceTier, the EmbeddingGemma actor. EmbeddingIndex: VectorIndex. Tests/.../Fixtures from
                           stages/s5_swift/export_fixtures.py; RuntimeTests need make_contract_model, EndToEndTests s4
-Examples/PhotoSearchDemo/ SwiftUI demo app (planned: Task 20)
+Examples/PhotoSearchDemo/ SwiftUI demo app + s6 benchmark (XcodeGen project.yml; Team.xcconfig and Model/ gitignored)
 docs/decisions/           ADR-NNNN-*.md (numbered)
 docs/RESULTS.md           GENERATED parity and benchmark tables (planned: Task 21)
 docs/superpowers/         design spec and implementation plan
