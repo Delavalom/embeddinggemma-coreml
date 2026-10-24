@@ -45,3 +45,9 @@ RECIPES: dict[str, tuple[str, Callable[[ct.models.MLModel], ct.models.MLModel]]]
     "int4b32_table8": ("int4 per-block (32) weights, int8 per-channel table", _recipe(_int4(32), _int8())),
     "int8": ("int8 per-channel everywhere", _recipe(_int8(), _int8())),
 }
+
+# Measure-only variants (s4 --measure), never stage candidates: "fp16" is the uncompressed FP16 package on the Neural
+# Engine, the baseline that separates what FP16 on the Neural Engine costs from what compression costs (ADR-0006).
+MEASURE_ONLY: dict[str, tuple[str, Callable[[ct.models.MLModel], ct.models.MLModel]]] = {
+    "fp16": ("FP16, no weight compression (baseline)", lambda m: m),
+}

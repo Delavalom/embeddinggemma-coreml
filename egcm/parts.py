@@ -158,10 +158,10 @@ def _convert_child(name: str, precision: str, out: Path, recipes: list[str]) -> 
     gc.collect()
     saved = {}
     if recipes:
-        from egcm.compress import RECIPES
+        from egcm.compress import MEASURE_ONLY, RECIPES
 
         for r in recipes:
-            c = RECIPES[r][1](m)
+            c = (RECIPES | MEASURE_ONLY)[r][1](m)
             dest = out / r / f"{name}.mlpackage"
             dest.parent.mkdir(parents=True, exist_ok=True)
             c.save(str(dest))

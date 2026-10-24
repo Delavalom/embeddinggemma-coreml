@@ -14,7 +14,7 @@ import coremltools as ct
 import numpy as np
 
 from egcm import parts
-from egcm.compress import RECIPES
+from egcm.compress import MEASURE_ONLY, RECIPES
 from egcm.config import HF_SNAPSHOT, load
 from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
 from egcm.e5cache import PurgingPackage
@@ -129,7 +129,7 @@ def measure(recipes: list[str]) -> dict:
     variants = {}
     with BundlePruner() as pruner:
         for r in recipes:
-            variants[r] = evaluate_variant(r, RECIPES[r][0], {"package_mb": built["packages"][r]["mb"]}, out, pad_id,
+            variants[r] = evaluate_variant(r, (RECIPES | MEASURE_ONLY)[r][0], {"package_mb": built["packages"][r]["mb"]}, out, pad_id,
                                            gates, log)
             ranking.remove(out / f"{r}.mlpackage", out / f"{r}.zip")
             (out / "measurement.json").write_text(json.dumps({"variants": variants, "build": built}, indent=1) + "\n")
