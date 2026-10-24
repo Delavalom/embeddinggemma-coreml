@@ -111,7 +111,40 @@ def fill(report: Report) -> None:
     log(f"done: chosen {chosen} (winner {winner})")
 
 
+def measure(recipes: list[str]) -> dict:
+    """Build and evaluate the named variants without the stage runner (no report.json, no gate verdict): for
+    measurements while an upstream stage has not passed (ADR-0007). Writes artifacts/s4_compress/measure/
+    measurement.json; keeps no package."""
+    t0 = time.monotonic()
+
+    def log(msg: str) -> None:
+        print(f"[s4 measure {time.monotonic() - t0:7.1f}s] {msg}", flush=True)
+
+    gates = stage_gates(STAGE)
+    out = stage_dir(STAGE) / "measure"
+    out.mkdir(exist_ok=True)
+    log(f"disk free {disk_free_gb(out):.1f} GB; recipes {recipes}")
+    built = parts.build(STAGE, FUNCTIONS, "fp16", out, recipes=recipes, log=log)
+    pad_id = load(HF_SNAPSHOT)[0].pad_id
+    variants = {}
+    with BundlePruner() as pruner:
+        for r in recipes:
+            variants[r] = evaluate_variant(r, RECIPES[r][0], {"package_mb": built["packages"][r]["mb"]}, out, pad_id,
+                                           gates, log)
+            ranking.remove(out / f"{r}.mlpackage", out / f"{r}.zip")
+            (out / "measurement.json").write_text(json.dumps({"variants": variants, "build": built}, indent=1) + "\n")
+    res = {"variants": variants, "build": built, "e5_pruned_mb": round(pruner.deleted_mb),
+           "seconds": round(time.monotonic() - t0, 1)}
+    (out / "measurement.json").write_text(json.dumps(res, indent=1) + "\n")
+    return res
+
+
 def main() -> None:
+    import sys
+
+    if len(sys.argv) > 2 and sys.argv[1] == "--measure":
+        measure(sys.argv[2].split(","))
+        return
     run_stage(STAGE, fill)
 
 
