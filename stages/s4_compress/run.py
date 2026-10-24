@@ -18,6 +18,7 @@ from egcm.compress import RECIPES
 from egcm.config import HF_SNAPSHOT, load
 from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
 from egcm.e5cache import PurgingPackage
+from egcm.e5prune import BundlePruner
 from egcm.evaluate import latency_ms, run_images, run_texts, text_feed
 from egcm.functions import FUNCTIONS
 from egcm.gates import gates as stage_gates
@@ -82,11 +83,13 @@ def fill(report: Report) -> None:
 
     variants: dict[str, dict] = {}
     winner = None
-    for recipe, (desc, _) in RECIPES.items():  # smallest first: the first that passes everything wins
-        variants[recipe] = evaluate_variant(recipe, desc, sizes[recipe], out, pad_id, gates, log)
-        if all(variants[recipe]["passes"].values()):
-            winner = recipe
-            break
+    with BundlePruner() as pruner:  # Core ML's E5 cache grows ~1.1 GB a minute while evaluating
+        for recipe, (desc, _) in RECIPES.items():  # smallest first: the first that passes everything wins
+            variants[recipe] = evaluate_variant(recipe, desc, sizes[recipe], out, pad_id, gates, log)
+            if all(variants[recipe]["passes"].values()):
+                winner = recipe
+                break
+    report.details["e5_pruned_mb"] = round(pruner.deleted_mb)
     report.details["variants"] = variants
     # with no winner, report the variant closest to passing (most gates met, then smallest download)
     chosen = winner or min(variants, key=lambda r: (-sum(variants[r]["passes"].values()), variants[r]["download_mb"]))
