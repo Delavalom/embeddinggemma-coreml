@@ -52,6 +52,9 @@ Found 2026-10-23/24 and fixed in the model (each exact in maths):
 - **Disk fills while evaluating.** Each function load leaves a Core ML E5 bundle (about one copy of its weights) in
   `~/Library/Caches/python3/com.apple.e5rt.e5bundlecache`; `egcm/e5cache.py` deletes this process's new bundles
   between loads.
+- **Two images below 0.995 on the Neural Engine (open, 2026-10-24).** i141 (embed_image_70_wide, 0.99404) and i161
+  (embed_image_280_landscape, 0.99405); the same package on the GPU gives i141 0.99970. Measurements and options in
+  `docs/decisions/ADR-0006-s3-image-fp16-on-ane.md` (proposed).
 - **The Mac sleeps mid-run** (monotonic timestamps fall behind the wall clock). Run long stages as
   `caffeinate -i -s just stage N`.
 
