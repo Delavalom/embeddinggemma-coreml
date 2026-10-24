@@ -21,7 +21,7 @@ from egcm.e5cache import PurgingPackage
 from egcm.evaluate import latency_ms, run_images, run_texts, text_feed
 from egcm.functions import FUNCTIONS
 from egcm.paths import stage_dir
-from egcm.placement import ane_placement
+from egcm.placement import ane_placement_per_function
 from egcm.report import Report
 from egcm.stage import run_stage
 from stages.s3_coreml_ane import probe_main
@@ -55,7 +55,7 @@ def fill(report: Report) -> None:
     compile_package(pkg, compiled)
     report.details["compiled_mb"] = size_mb(compiled)
 
-    placement = ane_placement(compiled, UNITS)
+    placement = ane_placement_per_function(pkg, FUNCTIONS, out / "placement", UNITS, log=log)
     report.metrics["min_ane_fraction"] = min(p["fraction"] for p in placement.values())
     report.details["placement"] = placement
     log(f"Neural Engine fraction min {report.metrics['min_ane_fraction']:.4f}; off-ANE ops: "

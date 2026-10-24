@@ -12,8 +12,9 @@ This Mac has 16 GB of RAM shared with other apps, so a stage never holds more th
   parts whose sha matches; different code starts over.
 - **Guards**: a child aborts (exit 70) if its physical footprint (resident + compressed) passes `FOOTPRINT_LIMIT_GB`,
   or system swap grows by more than `SWAP_GROWTH_LIMIT_GB` while it runs (the swap baseline on this Mac is already
-  about 12 GB before any conversion, so an absolute limit would never let a part start). The parent refuses a step
-  that would leave less than `MIN_FREE_GB` free on disk.
+  about 12 GB before any conversion, so an absolute limit would never let a part start). The parent holds a step
+  that would leave less than `MIN_FREE_GB` (conversion) / `MIN_FREE_GB_MERGE` (merge) free until space returns, for
+  up to `DISK_WAIT_S`, then fails.
 """
 
 from __future__ import annotations
@@ -35,7 +36,9 @@ from pathlib import Path
 
 FOOTPRINT_LIMIT_GB = 9.0
 SWAP_GROWTH_LIMIT_GB = 6.0
-MIN_FREE_GB = 25.0
+MIN_FREE_GB = 25.0  # conversion steps (they can also push the system into swap, which lives on the same disk)
+MIN_FREE_GB_MERGE = 15.0  # merge steps: disk only, no extra memory (agreed with the coordinator 2026-10-24)
+DISK_WAIT_S = 1800  # a step waits this long for space (other processes share the disk) before failing
 GUARD_EXIT = 70
 
 
@@ -205,11 +208,18 @@ def _run(args: list[str], tmp: Path) -> dict:
     return json.loads(p.stdout.strip().splitlines()[-1])
 
 
-def _need_disk(path: Path, gb: float, what: str) -> None:
-    free = disk_free_gb(path)
-    if free - gb < MIN_FREE_GB:
-        raise RuntimeError(f"{what} needs about {gb:.1f} GB; {free:.1f} GB free would leave less than "
-                           f"{MIN_FREE_GB:.0f} GB")
+def _need_disk(path: Path, gb: float, what: str, floor: float = MIN_FREE_GB, log: Callable[[str], None] = print,
+               wait_s: float = DISK_WAIT_S) -> None:
+    """Wait (up to `wait_s`) until `gb` more can be written while keeping `floor` GB free; then raise."""
+    deadline, warned = time.monotonic() + wait_s, False
+    while (free := disk_free_gb(path)) - gb < floor:
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"{what} needs about {gb:.1f} GB; {free:.1f} GB free would leave less than "
+                               f"{floor:.0f} GB (waited {wait_s / 60:.0f} min)")
+        if not warned:
+            log(f"{what}: {free:.1f} GB free, waiting for {gb + floor:.1f} GB")
+            warned = True
+        time.sleep(30)
 
 
 def build(stage: str, names: Iterable[str], precision: str, out: Path, recipes: list[str] | None = None,
@@ -257,7 +267,7 @@ def build(stage: str, names: Iterable[str], precision: str, out: Path, recipes: 
                                            == tree_sha(part_path(k, name)))]
         if missing:
             last = max(state["part_mb"].values(), default=1200.0) / 1e3
-            _need_disk(out, 2.5 * last * max(1, len(keys)), f"converting {name}")
+            _need_disk(out, 2.5 * last * max(1, len(keys)), f"converting {name}", log=log)
             t = time.monotonic()
             res = _run(["convert", "--function", name, "--precision", precision, "--out", str(parts_dir),
                         "--recipes", ",".join(recipes or [])], out / "tmp")
@@ -271,7 +281,9 @@ def build(stage: str, names: Iterable[str], precision: str, out: Path, recipes: 
                 + ", ".join(f"{state['parts'][f'{k}/{name}']['mb']:.0f} MB" for k in keys))
         for k in todo:
             pkg, p = out / f"{k}.mlpackage", part_path(k, name)
-            _need_disk(out, 2 * (size_mb(pkg) / 1e3 if pkg.exists() else 0) + size_mb(p) / 1e3, f"merging {name}")
+            # the new package (package + part) is written before the old one is deleted
+            _need_disk(out, (size_mb(pkg) / 1e3 if pkg.exists() else 0) + size_mb(p) / 1e3, f"merging {name}",
+                       floor=MIN_FREE_GB_MERGE, log=log)
             t = time.monotonic()
             res = _run(["merge", "--into", str(pkg), "--part", str(p), "--function", name], out / "tmp")
             state["peak_footprint_gb"][f"merge/{k}/{name}"] = res["peak_footprint_gb"]

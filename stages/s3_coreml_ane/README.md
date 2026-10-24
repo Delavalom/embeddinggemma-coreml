@@ -37,6 +37,24 @@ conversions, a Neural Engine compile per function on first load, 600 predictions
 
 ## Known failure modes
 
+Found 2026-10-23/24 and fixed in the model (each exact in maths):
+
+- **Image cosine about 0.90 on the Neural Engine, 0.9998 on the GPU.** A concat along the sequence axis (prefix + soft
+  tokens + suffix) returned garbage on the Neural Engine for the tokens after the soft tokens (suffix at an unaligned
+  offset; cosine 0.0001 for eos). `ImageEmbedder` now builds the sequence as `affixes + soft @ place` (constant 0/1
+  placement matrix). Bisect method: convert prefixes of the model at FP16 and compare each on CPU_AND_GPU and
+  CPU_AND_NE against FP32 torch, token by token.
+- **NaN on CPU FP16.** The sum of squares in L2 normalization overflowed FP16 (pooled values about 2,800). Now
+  divided by max |v| first; mean pooling weights each token by 1/n before the sum.
+- **Placement 0 for 13 of 14 functions.** `MLComputePlan` plans only the default function of a multifunction model and
+  rejects the multifunction description syntax; placement is measured per function on an extracted single-function
+  package (`egcm/placement.py`).
+- **Disk fills while evaluating.** Each function load leaves a Core ML E5 bundle (about one copy of its weights) in
+  `~/Library/Caches/python3/com.apple.e5rt.e5bundlecache`; `egcm/e5cache.py` deletes this process's new bundles
+  between loads.
+- **The Mac sleeps mid-run** (monotonic timestamps fall behind the wall clock). Run long stages as
+  `caffeinate -i -s just stage N`.
+
 - **Cosine fails, probe shows `overflow_risk` on the residual stream**: spec §7 mitigation (b), scale the embeddings
   and residual stream by 1/s and divide the post-norm weights by s (exact; see plan Task 14). Needs an ADR.
 - **Cosine fails without overflow**: precision loss in a specific op; mitigation (c), keep those ops in FP32 with

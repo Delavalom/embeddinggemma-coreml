@@ -22,7 +22,7 @@ from egcm.evaluate import latency_ms, run_images, run_texts, text_feed
 from egcm.functions import FUNCTIONS
 from egcm.gates import gates as stage_gates
 from egcm.paths import stage_dir
-from egcm.placement import ane_placement
+from egcm.placement import ane_placement_per_function
 from egcm.report import Report
 from egcm.stage import run_stage
 from stages.s4_compress import ranking
@@ -50,7 +50,7 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     m |= {"description": desc, "package_mb": sizes["package_mb"], "download_mb": size_mb(zipped),
           "by_function": {"text": texts["by_function"], "image": images["by_function"]}}
     m["passes"] = passes(m, gates)
-    placement = ane_placement(compiled, UNITS)
+    placement = ane_placement_per_function(pkg, FUNCTIONS, out / "placement", UNITS, log=log)
     m["ane_fraction_min"] = min(v["fraction"] for v in placement.values())
     m["off_ane"] = {k: v["off_ane"] for k, v in placement.items() if v["off_ane"]}
     feeds = {"embed_text_16": text_feed(np.array([2, 8071, 236787, 1], np.int32), pad_id)[1],

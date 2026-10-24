@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import gc
 import shutil
+import sys
 from pathlib import Path
 
 import coremltools as ct
 
 from egcm.evaluate import Package
 
-CACHE_ROOTS = tuple(Path.home() / "Library" / "Caches" / name / "com.apple.e5rt.e5bundlecache"
-                    for name in ("python3", "python", "python3.12"))
+# The cache folder is named after the process's executable, so purging it never touches another program's bundles.
+# (A second Python process with the same executable name would share it; the stages run one at a time.)
+CACHE_ROOTS = (Path.home() / "Library" / "Caches" / Path(sys.executable).name / "com.apple.e5rt.e5bundlecache",)
 
 
 def bundles() -> set[Path]:

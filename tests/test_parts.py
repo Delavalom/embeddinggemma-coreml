@@ -51,7 +51,7 @@ def fake(monkeypatch, tmp_path):
         return {"functions": names, "peak_footprint_gb": 0.5}
 
     monkeypatch.setattr(parts, "_run", run)
-    monkeypatch.setattr(parts, "_need_disk", lambda *a: None)
+    monkeypatch.setattr(parts, "_need_disk", lambda *a, **k: None)
     monkeypatch.setattr("egcm.provenance.code_hash", lambda stage: "h1")
     return calls, tmp_path
 
@@ -109,3 +109,15 @@ def test_recipes_build_one_package_each_from_one_conversion(fake):
     assert [c[0] for c in calls] == ["convert", "merge", "merge"] * 2
     assert set(r["packages"]) == {"x", "y"}
     assert all(p["functions"] == ["a", "b"] for p in r["packages"].values())
+
+
+def test_disk_guard_waits_then_fails(monkeypatch, tmp_path):
+    free = iter([10.0, 10.0, 30.0])
+    monkeypatch.setattr(parts, "disk_free_gb", lambda _: next(free))
+    monkeypatch.setattr(parts.time, "sleep", lambda _: None)
+    logs = []
+    parts._need_disk(tmp_path, 2.0, "merge x", floor=15.0, log=logs.append)  # waits until 30 GB free
+    assert len(logs) == 1 and "waiting" in logs[0]
+    monkeypatch.setattr(parts, "disk_free_gb", lambda _: 10.0)
+    with pytest.raises(RuntimeError, match=r"merge y needs about 2\.0 GB"):
+        parts._need_disk(tmp_path, 2.0, "merge y", floor=15.0, log=logs.append, wait_s=0)

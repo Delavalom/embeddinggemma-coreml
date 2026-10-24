@@ -119,3 +119,19 @@ def merge(sources: list[tuple[Path, str, str]], out: Path, default: str) -> dict
     shutil.rmtree(out, ignore_errors=True)
     tmp.rename(out)
     return {"functions": names, "blob_refs": refs, "blobs_written": len(seen)}
+
+
+def extract(pkg: Path, function: str, out: Path) -> dict:
+    """`out`: a plain single-function model (`main`, interface at the top level, no multifunction syntax) holding
+    `function` of `pkg`, for APIs that reject multifunction models (MLComputePlan)."""
+    res = merge([(pkg, function, "main")], out, "main")
+    spec = load_spec(out)
+    fd = spec.description.functions[0]
+    desc = spec.description
+    for field in ("input", "output", "state"):
+        getattr(desc, field).extend(getattr(fd, field))
+    desc.predictedFeatureName, desc.predictedProbabilitiesName = fd.predictedFeatureName, fd.predictedProbabilitiesName
+    del desc.functions[:]
+    desc.ClearField("defaultFunctionName")
+    _spec_path(out).write_bytes(spec.SerializeToString())
+    return res

@@ -62,3 +62,30 @@ def test_matches_save_multifunction(model, tmp_path, variant):
     for n in (7, 25):
         fn, feed = text_feed(np.arange(1, n + 1, dtype=np.int32) * 37 % 4000, pad_id=0)
         np.testing.assert_array_equal(a.embed(fn, feed), b.embed(fn, feed))
+
+
+def test_extract_gives_a_plain_single_function_model(model, tmp_path):
+    text, table = model
+    srcs = []
+    for name in NAMES:
+        n = int(name.rsplit("_", 1)[1])
+        m = convert(name, TextFunction(TextEmbedder(text.tower, table, n)),
+                    (torch.zeros(1, n, dtype=torch.int32), torch.ones(1, n, dtype=torch.int32)), ct.precision.FLOAT16)
+        p = tmp_path / f"{name}.mlpackage"
+        m.save(str(p))
+        srcs.append((p, "main", name))
+    merged = tmp_path / "M.mlpackage"
+    mfmerge.merge(srcs, merged, "embed_text_16")
+    one = tmp_path / "one.mlpackage"
+    mfmerge.extract(merged, "embed_text_32", one)
+    spec = mfmerge.load_spec(one)
+    assert not spec.description.functions and not spec.description.defaultFunctionName
+    assert [i.name for i in spec.description.input] == ["input_ids", "attention_mask"]
+    assert list(spec.mlProgram.functions) == ["main"]
+    if platform.system() != "Darwin":
+        return
+    a = Package(compile_package(one, tmp_path / "one.mlmodelc"), ct.ComputeUnit.CPU_ONLY)
+    b = Package(compile_package(merged, tmp_path / "M.mlmodelc"), ct.ComputeUnit.CPU_ONLY)
+    fn, feed = text_feed(np.arange(1, 21, dtype=np.int32), pad_id=0)
+    assert fn == "embed_text_32"
+    np.testing.assert_array_equal(a.function("main").predict(feed)["embedding"], b.embed(fn, feed).reshape(1, -1))
