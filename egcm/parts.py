@@ -36,7 +36,10 @@ from pathlib import Path
 
 FOOTPRINT_LIMIT_GB = 9.0
 SWAP_GROWTH_LIMIT_GB = 6.0
-MIN_FREE_GB = 25.0  # conversion steps (they can also push the system into swap, which lives on the same disk)
+# Conversion steps write about 1.2 GB (part + coremltools' temporary copy); the floor leaves room for swap growth on
+# the same disk, which the footprint / swap guards bound. Lowered from 25 GB on 2026-10-24 (the shared disk sat at
+# 25-27 GB free while another build ran, so s3 could not start a part).
+MIN_FREE_GB = 20.0
 MIN_FREE_GB_MERGE = 15.0  # merge steps: disk only, no extra memory (agreed with the coordinator 2026-10-24)
 DISK_WAIT_S = 1800  # a step waits this long for space (other processes share the disk) before failing
 GUARD_EXIT = 70
@@ -266,8 +269,8 @@ def build(stage: str, names: Iterable[str], precision: str, out: Path, recipes: 
                                            and state["parts"].get(f"{k}/{name}", {}).get("sha256")
                                            == tree_sha(part_path(k, name)))]
         if missing:
-            last = max(state["part_mb"].values(), default=1200.0) / 1e3
-            _need_disk(out, 2.5 * last * max(1, len(keys)), f"converting {name}", log=log)
+            last = max(state["part_mb"].values(), default=1100.0 if precision == "fp32" else 600.0) / 1e3
+            _need_disk(out, 2.0 * last * max(1, len(keys)), f"converting {name}", log=log)
             t = time.monotonic()
             res = _run(["convert", "--function", name, "--precision", precision, "--out", str(parts_dir),
                         "--recipes", ",".join(recipes or [])], out / "tmp")
