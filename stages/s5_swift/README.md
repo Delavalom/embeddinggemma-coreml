@@ -1,7 +1,49 @@
 # s5_swift
 
-The Swift package on macOS against s0: token ids, preprocessed pixels, and (once s4 exists) end-to-end vectors.
-`run.py` and the `egcm-parity` CLI land with Task 19; this README covers the unit-test fixtures for now.
+The Swift package on macOS against s0: token ids, preprocessed pixels, and end-to-end vectors.
+
+Run: `just stage 5` (the `convert` group). Needs fresh passing s0 and s4 (`artifacts/s4_compress/EmbeddingGemma2.mlpackage`).
+
+## What it does
+
+1. `run.py` writes the synthetic pattern (`export_fixtures.synthetic`) at `SYNTHETIC_SIZES` as PNGs into
+   `artifacts/s5_swift/synthetic/`, with torch's uint8 antialiased bicubic of each as the reference.
+2. It runs `swift run -c release egcm-parity` (`swift/Sources/egcm-parity/`). The CLI goes through the path an app
+   takes: it puts the package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`) in a
+   local published folder with `files.json`, installs it with `ModelStore` (verify, compile) and loads
+   `EmbeddingGemma.load(.file(...), dimensions: 768)` once per budget, on `.cpuAndNeuralEngine`. For every fixture
+   text (prompt by kind: `query` or `document`) it records the token ids and the vector; for every fixture image and
+   each synthetic PNG at budgets 70 and 280 it records the bucket, the sha256 of the uint8 bucket image and 8,192
+   pixel values (the `export_fixtures` sampling rule), and for fixture images the vector. Output:
+   `artifacts/s5_swift/parity.json`.
+3. `compare.py` (pure functions, `tests/test_s5_compare.py`) compares that with s0 and the torch references.
+
+## Metrics
+
+- `token_ids_identical`: every one of the 200 texts has exactly s0's ids (`ids_<id>` in `texts.npz`), none missing.
+- `max_pixel_abs_diff`: the 99th percentile of `|swift - reference|` (0-1 units) over the pixel samples of the
+  decode-identical inputs (ADR-0004): the PNG fixtures against s0's stored bucket pixels and the synthetic PNGs
+  against torch. It is `inf` if any image lands in another bucket than the reference or an output is missing.
+  `details.pixels` also has the JPEG numbers (`jpeg_pixel_p99`, decoder included, recorded only), the maxima, and the
+  bit-exact counts per group.
+- `min_cosine`: the minimum over the 200 text vectors and the 400 image vectors (both budgets), each against s0's
+  vector for the same input (`emb`, `emb_bucket`). `details.cosine` splits it by text kind and by budget and format,
+  with the five worst ids of each.
+
+## Gate
+
+`gates.toml [s5_swift]`: `token_ids_identical == true`, `max_pixel_abs_diff <= 0.003922`, `min_cosine >= 0.99`.
+
+## Measuring a package without a report
+
+```
+uv run --exact --group convert python -m stages.s5_swift.run --measure <pkg> [--s0 <dir>] [--compute-units cpuOnly] [--limit N]
+```
+
+runs the same comparison on any package with the spec section 7 I/O and prints the metrics and details as JSON
+(files go to `artifacts/s5_swift/measure/`). On the contract model (below), 2026-10-24, M1 Pro: ids identical for
+200/200 texts; pixels bit-exact for 60/60 PNG and 20/20 synthetic cases, so `max_pixel_abs_diff` 0; JPEG p99 2/255,
+max 31/255, 0/340 bit-exact. Its cosines mean nothing (it is not a model of anything); they only show the plumbing.
 
 ## Unit-test fixtures
 
@@ -74,3 +116,9 @@ command as the message; with `EGCM_REQUIRE_ARTIFACTS=1` (CI) it fails instead.
   the resize. See ADR-0004. It shows up again, if anywhere, in the end-to-end cosine on JPEG fixtures.
 - **Tokenizer download fails:** the tests need network once (huggingface.co). After that the verified cache in
   `artifacts/tokenizer/` is used.
+- **`max_pixel_abs_diff` is inf:** read `details.pixels.bucket_mismatches` and `details.missing`. A bucket mismatch
+  means `Buckets.swift` and `egcm/buckets.py` disagree on that size; that is a bug, not a precision question.
+- **Cosine fails only on JPEG images (`details.cosine.image.*_jpeg`) while PNG passes:** the decoder (ADR-0004).
+  Compare with s4's cosine for the same ids, which used PIL's decode: if s4 passes them, it is ImageIO vs PIL.
+- **Cosine fails on texts as well:** compare `details.compute_units` and s4's `CPU_AND_NE` numbers; s5 runs the same
+  package on the same units, so a gap there points at the Swift runtime (inputs, function choice), not the model.
