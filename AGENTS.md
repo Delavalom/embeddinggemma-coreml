@@ -27,11 +27,11 @@ Full design: `docs/superpowers/specs/2026-10-22-embeddinggemma-coreml-design.md`
 All actions are one command. Run them from the repo root. Run scripts as modules (`python -m scripts.gen_status`), never by path.
 
 ```
-just setup             # uv sync --group convert; swift package resolve once swift/ exists (planned: Task 16)
+just setup             # uv sync --group convert; swift package resolve
 just status            # regenerate STATUS.md and print it
 just stage <N>         # run stage N, write its report, exit non-zero on fail
 just all               # stages 0–5 in order, stop at the first failure
-just test              # pytest, plus swift test once swift/ exists (planned: Task 16)
+just test              # pytest, plus swift test (first run downloads the 32 MB tokenizer into artifacts/tokenizer/)
 just lint              # ruff check
 just bench-device      # run the s6 benchmark on the connected iPhone (planned: Task 20)
 just publish           # s7. Refuses to run unless s0–s6 pass AND --confirm is given (planned: Task 22)
@@ -81,7 +81,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | min cosine ≥ 0.995, and ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
 | **s4_compress** | int8 weights first, then 4-bit palettization. Keep the smallest variant that passes | min cosine ≥ 0.99 (text and image combined), recall@10 ≥ 0.95, 5th-percentile Spearman ρ of the top-50 ≥ 0.9, full download ≤ 300 MB |
-| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255; end-to-end min cosine ≥ 0.99 against s0 |
+| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255 (p99 on decode-identical inputs, ADR-0004); end-to-end min cosine ≥ 0.99 against s0 |
 | **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target (`[s6_device.targets]`), not gated |
 | **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
 
@@ -127,7 +127,10 @@ stages/sN_*/              README.md (input, output, gate, known failure modes) +
 scripts/                  package. gen_status.py now; gen_results.py, check_gates_adr.py, check_large_files.py (planned: Task 21)
 tests/                    pytest unit tests for the Python library
 fixtures/                 written by build_fixtures and committed: images/, images.jsonl, texts.jsonl (hand-written), commons_sources.json, MANIFEST.sha256
-swift/                    SwiftPM package, Package.swift at swift/ (planned: Task 16)
+swift/                    SwiftPM package (Package.swift here). EmbeddingGemma: Buckets, ImagePreprocessor + Resampler
+                          (torch uint8 AA bicubic port), TextEncoder, ModelStore (files.json, SHA-256, compile),
+                          DeviceTier, the EmbeddingGemma actor. EmbeddingIndex: VectorIndex. Tests/.../Fixtures from
+                          stages/s5_swift/export_fixtures.py; RuntimeTests need make_contract_model, EndToEndTests s4
 Examples/PhotoSearchDemo/ SwiftUI demo app (planned: Task 20)
 docs/decisions/           ADR-NNNN-*.md (numbered)
 docs/RESULTS.md           GENERATED parity and benchmark tables (planned: Task 21)
