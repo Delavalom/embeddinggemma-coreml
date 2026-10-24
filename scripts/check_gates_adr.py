@@ -1,6 +1,7 @@
 """Fail when gates.toml changes without a new docs/decisions/ADR-*.md. Run as `python -m scripts.check_gates_adr`.
 
-CI diffs against the merge base with origin/main; locally it checks the last commit (HEAD~1..HEAD).
+Pass the git range to check (CI does: the PR base or the pushed range). Without one it is `origin/main...HEAD` when
+`CI` is set, else the last commit (`HEAD~1...HEAD`).
 """
 
 from __future__ import annotations
@@ -8,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from egcm.paths import ROOT
 
@@ -17,9 +19,9 @@ def violates(paths: list[str]) -> bool:
     return "gates.toml" in paths and not any(p.startswith("docs/decisions/ADR-") for p in paths)
 
 
-def changed_paths(base: str) -> list[str]:
+def changed_paths(base: str, root: Path = ROOT) -> list[str]:
     out = subprocess.run(
-        ["git", "diff", "--name-only", base], cwd=ROOT, capture_output=True, text=True, check=True
+        ["git", "diff", "--name-only", base], cwd=root, capture_output=True, text=True, check=True
     ).stdout
     return [line for line in out.splitlines() if line]
 
@@ -29,10 +31,11 @@ def default_base() -> str:
     return "origin/main...HEAD" if os.environ.get("CI") else "HEAD~1...HEAD"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
+    """argv[0], if given, is the git range to check (CI passes `<base>...HEAD`)."""
     args = sys.argv[1:] if argv is None else argv
     base = args[0] if args else default_base()
-    paths = changed_paths(base)
+    paths = changed_paths(base, root)
     if violates(paths):
         print(f"error: gates.toml changed in {base} without a new docs/decisions/ADR-*.md", file=sys.stderr)
         return 1
