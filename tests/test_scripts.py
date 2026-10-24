@@ -62,6 +62,7 @@ def test_just_stage_errors_are_clear():
     for bad in ("9", "x", "1; ls"):
         r = run(bad)
         assert r.returncode == 2 and "error:" in r.stderr, (bad, r.stderr)
-    missing = next(n for n in "01234567" if not (Path(ROOT) / "stages" / STAGES[int(n)] / "run.py").exists())
-    r = run(missing)
-    assert r.returncode == 2 and "does not exist yet" in r.stderr
+    missing = next((n for n in "01234567" if not (Path(ROOT) / "stages" / STAGES[int(n)] / "run.py").exists()), None)
+    if missing is not None:  # once every stage has a run.py there is nothing left to check
+        r = run(missing)
+        assert r.returncode == 2 and "does not exist yet" in r.stderr
