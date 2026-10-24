@@ -65,3 +65,30 @@ def test_just_stage_errors_are_clear():
     missing = next(n for n in "01234567" if not (Path(ROOT) / "stages" / STAGES[int(n)] / "run.py").exists())
     r = run(missing)
     assert r.returncode == 2 and "does not exist yet" in r.stderr
+
+
+def test_status_shows_key_metrics_and_committed_results(repo):
+    put(repo, "s0_reference", status="failed", metrics={"min_a": 0.123456789, "flag": True, "other": 3},
+        gate_values={"min_a": 0.5, "flag": True}, failures=["min_a: 0.123456789 not >= 0.5"])
+    row = next(line for line in render(repo).splitlines() if line.startswith("| s0_reference"))
+    assert "| min_a=0.123457, flag=true |" in row  # gated metrics only, in gate order
+
+    results = repo / "docs" / "results"
+    results.mkdir(parents=True)
+    write_report(Report(stage="s6_device", status="passed", passed=True, git_sha="b" * 40,
+                        metrics={"max_peak_rss_mb": 512.0, "min_devices": 1},
+                        gate_values={"max_peak_rss_mb": 800, "min_devices": 1}), results)
+    (results / "report.json").rename(results / "s6_iPhone16,1.json")
+    (results / "broken.json").write_text("{")
+    text = render(repo)
+    assert "## Committed results (docs/results/)" in text
+    assert "| s6_iPhone16,1.json | s6_device | passed | yes | bbbbbbb | max_peak_rss_mb=512, min_devices=1 |" in text
+    assert "| broken.json | - | invalid |" in text
+
+
+def test_status_with_only_committed_results(repo):
+    results = repo / "docs" / "results"
+    results.mkdir(parents=True)
+    write_report(Report(stage="s6_device", status="passed", passed=True), results)
+    text = render(repo)
+    assert "No stages run yet" in text and "| report.json | s6_device | passed |" in text
