@@ -41,7 +41,10 @@ def fmt(v: object) -> str:
     if isinstance(v, bool) or v is None:
         return str(v).lower()
     if isinstance(v, float):
-        return f"{v:.6g}"
+        text = f"{v:.6g}"
+        if text == "1" and v < 1:  # a cosine of 0.99999998 must not read as exactly 1
+            return f"1 - {1 - v:.2g}"
+        return text
     return str(v)
 
 

@@ -92,3 +92,11 @@ def test_status_with_only_committed_results(repo):
     write_report(Report(stage="s6_device", status="passed", passed=True), results)
     text = render(repo)
     assert "No stages run yet" in text and "| report.json | s6_device | passed |" in text
+
+
+def test_fmt_never_rounds_up_to_one():
+    from scripts.gen_status import fmt
+
+    assert fmt(0.9999999814435638) == "1 - 1.9e-08"
+    assert fmt(1.0) == "1" and fmt(0.994037) == "0.994037" and fmt(True) == "true" and fmt(None) == "none"
+    assert fmt(float("inf")) == "inf" and fmt(3) == "3"
