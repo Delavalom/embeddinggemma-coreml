@@ -1,0 +1,4 @@
+// Shared settings. The signing team lives in Team.xcconfig (gitignored), written by
+// `uv run --exact --group convert python -m stages.s6_device.team` from App Store Connect (`asc`).
+// `#include?` makes it optional, so the project still generates and compiles (unsigned) without it.
+#include? "Team.xcconfig"

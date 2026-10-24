@@ -9,3 +9,5 @@ Examples/PhotoSearchDemo/*.xcodeproj
 .DS_Store
 .pytest_cache/
 .ruff_cache/
+Examples/PhotoSearchDemo/Team.xcconfig
+Examples/PhotoSearchDemo/Model/
