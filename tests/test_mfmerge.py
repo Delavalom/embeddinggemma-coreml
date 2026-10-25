@@ -30,7 +30,7 @@ def model():
     return text, table
 
 
-@pytest.mark.parametrize("variant", ["fp32", "fp16", "int4b32_table8"])
+@pytest.mark.parametrize("variant", ["fp32", "fp16", "int4b32_kv8"])
 def test_matches_save_multifunction(model, tmp_path, variant):
     text, table = model
     srcs = []

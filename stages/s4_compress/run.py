@@ -39,7 +39,10 @@ def passes(m: dict, gates: dict) -> dict[str, bool]:
             "max_download_mb": m["download_mb"] <= gates["max_download_mb"]}
 
 
-def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gates: dict, log) -> dict:
+def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gates: dict, log,
+                     placement: bool = True) -> dict:
+    """Metrics for out/<recipe>.mlpackage on CPU_AND_NE. `placement=False` skips the Neural Engine placement
+    analysis (about 90 minutes for 14 functions; scripts.measure_s4_eval)."""
     pkg, compiled, zipped = out / f"{recipe}.mlpackage", out / f"{recipe}.mlmodelc", out / f"{recipe}.zip"
     if problems := contract_problems(pkg, FUNCTIONS):
         raise AssertionError(f"{recipe}: I/O contract mismatch: {problems}")
@@ -51,9 +54,8 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     m |= {"description": desc, "package_mb": sizes["package_mb"], "download_mb": size_mb(zipped),
           "by_function": {"text": texts["by_function"], "image": images["by_function"]}}
     m["passes"] = passes(m, gates)
-    placement = ane_placement_per_function(pkg, FUNCTIONS, out / "placement", UNITS, log=log)
-    m["ane_fraction_min"] = min(v["fraction"] for v in placement.values())
-    m["off_ane"] = {k: v["off_ane"] for k, v in placement.items() if v["off_ane"]}
+    if placement:
+        m |= placement_metrics(pkg, out, log)
     feeds = {"embed_text_16": text_feed(np.array([2, 8071, 236787, 1], np.int32), pad_id)[1],
              "embed_image_70_square": {"pixels": np.random.default_rng(0).random((1, 3, 384, 384), np.float32)}}
     m["latency_cpu_and_ne"] = {fn: latency_ms(p, fn, f) for fn, f in feeds.items()}
@@ -65,6 +67,13 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
         f"{m['min_p5_spearman_top50']:.3f} (vs bucket {m['vs_bucket']['min_p5_spearman_top50']:.3f}), "
         f"passes {m['passes']}")
     return m
+
+
+def placement_metrics(pkg, out, log) -> dict:
+    placement = ane_placement_per_function(pkg, FUNCTIONS, out / "placement", UNITS, log=log)
+    return {"ane_fraction_min": min(v["fraction"] for v in placement.values()),
+            "ane_fraction": {k: v["fraction"] for k, v in placement.items()},
+            "off_ane": {k: v["off_ane"] for k, v in placement.items() if v["off_ane"]}}
 
 
 def fill(report: Report) -> None:
@@ -129,8 +138,8 @@ def measure(recipes: list[str]) -> dict:
     variants = {}
     with BundlePruner() as pruner:
         for r in recipes:
-            variants[r] = evaluate_variant(r, (RECIPES | MEASURE_ONLY)[r][0], {"package_mb": built["packages"][r]["mb"]}, out, pad_id,
-                                           gates, log)
+            desc, sizes = (RECIPES | MEASURE_ONLY)[r][0], {"package_mb": built["packages"][r]["mb"]}
+            variants[r] = evaluate_variant(r, desc, sizes, out, pad_id, gates, log)
             ranking.remove(out / f"{r}.mlpackage", out / f"{r}.zip")
             (out / "measurement.json").write_text(json.dumps({"variants": variants, "build": built}, indent=1) + "\n")
     res = {"variants": variants, "build": built, "e5_pruned_mb": round(pruner.deleted_mb),
