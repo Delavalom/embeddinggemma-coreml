@@ -56,7 +56,7 @@ STAGE_CODE: dict[str, tuple[str, ...]] = {
     "s3_coreml_ane": ("stages/s3_coreml_ane", *_BUILD, "egcm/placement.py", "egcm/probe.py", "egcm/e5cache.py",
                       "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s4_compress": ("stages/s4_compress", "egcm/compress.py", *_BUILD, "egcm/placement.py", "egcm/e5cache.py",
-                    "egcm/e5prune.py", "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
+                    "egcm/e5prune.py", "egcm/ranking.py", "egcm/archive.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s5_swift": ("stages/s5_swift", "swift", *_COMPARE, *_LOCK),
     "s6_device": ("stages/s6_device", "swift", "Examples", "egcm/metrics.py", "egcm/paths.py", *_LOCK),
     "s7_publish": ("stages/s7_publish", "swift", "egcm/paths.py", *_LOCK),

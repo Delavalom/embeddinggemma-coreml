@@ -15,6 +15,7 @@ import coremltools as ct
 import numpy as np
 
 from egcm import parts
+from egcm.archive import device_archive
 from egcm.compress import MEASURE_ONLY, RECIPES
 from egcm.config import HF_SNAPSHOT, load
 from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
@@ -57,12 +58,14 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     pkg, compiled, zipped = out / f"{recipe}.mlpackage", out / f"{recipe}.mlmodelc", out / f"{recipe}.zip"
     if problems := contract_problems(pkg, FUNCTIONS):
         raise AssertionError(f"{recipe}: I/O contract mismatch: {problems}")
-    ranking.zip_package(pkg, zipped)
+    aar = device_archive(pkg, HF_SNAPSHOT, out / f"{recipe}.aar")  # the device download (package + tokenizer)
+    ranking.zip_package(pkg, zipped)  # the package alone, deflate: recorded for comparison (zip_mb), not gated
     compile_package(pkg, compiled)
     p = PurgingPackage(compiled, UNITS)
     texts, images = run_texts(p, pad_id), run_images(p, log=log)
     m = task_metrics(texts, images)
-    m |= {"description": desc, "package_mb": sizes["package_mb"], "download_mb": size_mb(zipped),
+    m |= {"description": desc, "package_mb": sizes["package_mb"], "download_mb": size_mb(aar),
+          "zip_mb": size_mb(zipped),
           "by_function": {"text": texts["by_function"], "image": images["by_function"]}}
     m["passes"] = passes(m, gates)
     if placement:
@@ -73,7 +76,9 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     p.close()
     del p
     ranking.remove(compiled)
-    log(f"{recipe}: download {m['download_mb']:.0f} MB, min cosine {m['min_cosine']:.5f}, recall@10 "
+    ranking.remove(zipped)
+    log(f"{recipe}: download (Apple Archive, LZFSE, with tokenizer) {m['download_mb']:.1f} MB (package zip "
+        f"{m['zip_mb']:.1f} MB), min cosine {m['min_cosine']:.5f}, recall@10 "
         f"{m['min_recall_at_10']:.3f}, p5 spearman {m['min_p5_spearman_top50']:.3f} (vs bucketed FP); top-1 in top 10 "
         f"{m['min_t2i_top1_in_top10']:.3f}, i2i p10 drop {m['max_i2i_label_p10_drop']:.3f}, recall@10 vs exact-aspect "
         f"{m['vs_raw']['min_recall_at_10']:.3f}; passes {m['passes']}")
@@ -115,20 +120,22 @@ def fill(report: Report) -> None:
     chosen = winner or min(variants, key=lambda r: (-sum(variants[r]["passes"].values()), variants[r]["download_mb"]))
     for recipe in RECIPES:
         if recipe != chosen:
-            ranking.remove(out / f"{recipe}.mlpackage", out / f"{recipe}.zip")
-    final, final_zip = out / "EmbeddingGemma2.mlpackage", out / "EmbeddingGemma2.mlpackage.zip"
-    ranking.remove(final, final_zip, out / "checksums.json")
+            ranking.remove(out / f"{recipe}.mlpackage", out / f"{recipe}.aar")
+    final, final_aar = out / "EmbeddingGemma2.mlpackage", out / "EmbeddingGemma2.aar"
+    ranking.remove(final, final_aar, out / "EmbeddingGemma2.mlpackage.zip", out / "checksums.json")
     (out / f"{chosen}.mlpackage").rename(final)
-    (out / f"{chosen}.zip").unlink()
-    if winner:  # the shippable package
-        ranking.zip_package(final, final_zip)
-        (out / "checksums.json").write_text(json.dumps(ranking.checksums(final, final_zip), indent=1) + "\n")
+    if winner:  # the shippable package and its device download (the archive names the package EmbeddingGemma2)
+        (out / f"{chosen}.aar").rename(final_aar)
+        (out / "checksums.json").write_text(json.dumps(ranking.checksums(final, final_aar), indent=1) + "\n")
+    else:
+        ranking.remove(out / f"{chosen}.aar")
     m = variants[chosen]
     report.metrics |= {k: m[METRIC_FOR_GATE.get(k, k)] for k in gates}
     # recorded only (gates.toml [s4_compress.targets]): text->image recall@10 against exact-aspect (ADR-0007)
     report.details["targets"] = {k: {"target": v, "value": m["vs_raw"][TARGET_METRIC[k]]}
                                  for k, v in targets(STAGE).items()}
     report.details |= {"chosen": chosen, "winner": winner, "package": final.name,
+                       "device_archive": final_aar.name if winner else None, "zip_mb": m["zip_mb"],
                        "seconds": round(time.monotonic() - t0, 1)}
     log(f"done: chosen {chosen} (winner {winner})")
 
@@ -153,7 +160,7 @@ def measure(recipes: list[str]) -> dict:
         for r in recipes:
             desc, sizes = (RECIPES | MEASURE_ONLY)[r][0], {"package_mb": built["packages"][r]["mb"]}
             variants[r] = evaluate_variant(r, desc, sizes, out, pad_id, gates, log)
-            ranking.remove(out / f"{r}.mlpackage", out / f"{r}.zip")
+            ranking.remove(out / f"{r}.mlpackage", out / f"{r}.aar")
             (out / "measurement.json").write_text(json.dumps({"variants": variants, "build": built}, indent=1) + "\n")
     res = {"variants": variants, "build": built, "e5_pruned_mb": round(pruner.deleted_mb),
            "seconds": round(time.monotonic() - t0, 1)}

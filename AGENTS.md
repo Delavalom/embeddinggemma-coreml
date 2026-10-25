@@ -80,7 +80,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s1_rewrite** | Our PyTorch rewrite, FP32, same inputs | min cosine ≥ 0.9999 (text and image). Strict weight load |
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | text min cosine ≥ 0.995; image min cosine ≥ 0.99 and 1st percentile ≥ 0.995; recall@10 ≥ 0.95 and p5 Spearman ≥ 0.9 against the bucketed FP reference (ADR-0006); ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
-| **s4_compress** | Linear weight quantization; ships `int8_table4` (int8 weights, int4 table; ADR-0007) | min cosine ≥ 0.99 (text and image combined); recall@10 ≥ 0.95 and 5th-percentile Spearman ρ of the top-50 ≥ 0.9 against the bucketed FP reference; exact-aspect top-1 in the top 10 ≥ 0.95 and image→image category precision@10 drop ≤ 0.03 (bucketing); download ≤ 360 MB |
+| **s4_compress** | Linear weight quantization; ships `int8_table4` (int8 weights, int4 table; ADR-0007) | min cosine ≥ 0.99 (text and image combined); recall@10 ≥ 0.95 and 5th-percentile Spearman ρ of the top-50 ≥ 0.9 against the bucketed FP reference; exact-aspect top-1 in the top 10 ≥ 0.95 and image→image category precision@10 drop ≤ 0.03 (bucketing); device download (Apple Archive, LZFSE, with the tokenizer) ≤ 360 MB |
 | **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255; end-to-end min cosine ≥ 0.99 against s0 |
 | **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target (`[s6_device.targets]`), not gated |
 | **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
@@ -121,6 +121,7 @@ egcm/                     shared Python library
   evaluate.py             runs every s0 fixture through a compiled package (s2-s4), latency
   parts.py                builds packages one process per part and per merge (16 GB Mac), resumable, memory/disk guards
   compress.py             s4 recipes: deterministic linear quantization (int8 / int4 per block), table separately
+  archive.py              the device download: one Apple Archive (LZFSE) of the package + tokenizer (s4 gate, s7)
   ranking.py              task-level metrics vs s0 (s3, s4): cosines, ranking vs bucketed FP, bucketing fidelity
   probe.py                activation max-abs probe (s3, diagnostic)
   placement.py            Neural Engine placement per function from MLComputePlan (s3, s4)

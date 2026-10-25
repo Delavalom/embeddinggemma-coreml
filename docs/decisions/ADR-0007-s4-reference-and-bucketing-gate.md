@@ -175,7 +175,7 @@ speed. `gates.toml [s4_compress]` changes in the same commit:
 | `min_p5_spearman_top50` | 0.9 against exact-aspect | 0.9 **against the bucketed FP reference** |
 | `min_t2i_top1_in_top10` | | **0.95** (new, (b): the exact-aspect top-1 image in the package's top 10, worst budget) |
 | `max_i2i_label_p10_drop` | | **0.03** (new, (b): image→image category precision@10, exact-aspect reference minus package, worst budget) |
-| `max_download_mb` | 300 | **360** |
+| `max_download_mb` | 300, the deflate zip of the package | **360, the device download: one Apple Archive (LZFSE) of the package and the tokenizer** |
 | `[s4_compress.targets]` | | `t2i_recall_at_10_exact_aspect = 0.95` (recorded, not gated) |
 
 The metrics are `egcm.ranking` (s3 uses the same module, ADR-0006); `stages/s4_compress/run.py` checks every gate in
@@ -186,4 +186,15 @@ Recipes (`egcm/compress.py`): `int8_table4` is the only stage candidate. `vis4kv
 (`MEASURE_ONLY`, still buildable with `scripts.measure_s4_eval`): `vis4kv8_text8` fails min cosine (0.917) and runs its
 int4 vision convs on the CPU (233 ms per image), and `int8` is about 410 MB, over the limit. Neither can win, and each
 would cost the stage about two hours of evaluation and placement before `int8_table4`.
+
+### What `max_download_mb` measures (2026-10-25)
+
+The 360 MB approval is for what an iPhone downloads. The app publishes and downloads one Apple Archive with LZFSE
+compression (`egcm.archive.device_archive`, built with `aa archive ... -a lzfse`, unpacked on iOS with the
+AppleArchive framework), holding exactly `EmbeddingGemma2.mlpackage/**` and `tokenizer/tokenizer.json`,
+`tokenizer/tokenizer_config.json` (the files the Swift tokenizer reads); no symlinks, deterministic order. The gate
+measures that file, tokenizer included; the deflate zip of the package alone, which the measurements above used
+(`int8_table4` 349.7 MB), is still recorded as `zip_mb` but not gated. s4 writes the archive as
+`artifacts/s4_compress/EmbeddingGemma2.aar`, with its sha256 in `checksums.json`. The limit stays 360 MB; if
+`int8_table4` measured over it, that goes back to the founder, not into this file.
 

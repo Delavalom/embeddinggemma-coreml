@@ -1,5 +1,5 @@
-"""s4 packaging helpers: the zipped download, checksums, cleanup. The variant metrics are egcm.ranking (shared with
-s3; ADR-0006, ADR-0007)."""
+"""s4 packaging helpers: the package zip (a recorded size, not the download), checksums, cleanup. The device
+download is egcm.archive; the variant metrics are egcm.ranking (shared with s3; ADR-0006, ADR-0007)."""
 
 from __future__ import annotations
 
@@ -27,9 +27,10 @@ def sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def checksums(pkg: Path, zipped: Path) -> dict:
+def checksums(pkg: Path, download: Path) -> dict:
+    """sha256 of the device download (`download`, the Apple Archive) and of every file of the package."""
     files = {p.relative_to(pkg.parent).as_posix(): sha256(p) for p in sorted(pkg.rglob("*")) if p.is_file()}
-    return {"zip": {zipped.name: sha256(zipped), "bytes": zipped.stat().st_size}, "files": files}
+    return {"archive": {download.name: sha256(download), "bytes": download.stat().st_size}, "files": files}
 
 
 def remove(*paths: Path) -> None:
