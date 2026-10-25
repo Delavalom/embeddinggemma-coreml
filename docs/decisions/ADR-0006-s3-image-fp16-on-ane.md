@@ -65,3 +65,25 @@ Per image function, minimum (mean) over its fixtures:
 
 Option 1, after measuring all 400 images and the latency of `embed_image_70_square` on `CPU_AND_GPU` (s6 records the
 on-device speed against the 60 ms target).
+
+## Measured (2026-10-24)
+
+The FP16 package on the Neural Engine at task level (s4's `fp16` baseline: `python -m scripts.measure_s4_eval`,
+commit 77d1241, `artifacts/s4_compress/measure/fast.json`), next to the GPU run for the images
+(`python -m scripts.measure_adr0006`, `artifacts/adr0006/measure.json`). Ranking: the 120 app queries over the 200
+images against the bucketed FP reference (s0 `emb_bucket`, which s2 matches to 2e-8), budget 70 / 280.
+
+| | images on the Neural Engine (`CPU_AND_NE`) | images on the GPU (`CPU_AND_GPU`) |
+|---|---|---|
+| min image cosine (400) | 0.99404 (i141, i161; next worst 0.99833) | 0.99795 |
+| text→image recall@10 vs bucketed FP | 0.968 / 0.983 | not measured |
+| p5 Spearman top-50 vs bucketed FP | 0.987 / 0.995 | not measured |
+| recall@10 / p5 Spearman with **only** i141 / i161 replaced by their Neural Engine vectors | 0.9975 / 0.9980 (70), 0.9992 / 0.9999 (280) | |
+| `embed_image_70_square`, median ms | 47.5 to 47.9 | 132.6 |
+| `embed_image_280_square`, median ms | 381.7 | 490.7 |
+| `embed_text_16`, median ms (text stays on the Neural Engine) | 6.5 | 6.5 |
+
+The two low-cosine images matter little at task level: i141 is in the top 10 of 9 queries and changes the top 10 of 3;
+i161 is in 2 and changes 1 (`artifacts/s4_compress/measure/adr0006_two_images.json`). The rest of the gap (recall@10
+0.968 against 0.9975 at budget 70) comes from the other 398 images' small FP16 differences, which reorder near ties
+(ADR-0007: ranks 10 and 11 differ by about 0.0013 in score). The GPU is 2.8x slower at budget 70 and 1.3x at 280.

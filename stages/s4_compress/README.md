@@ -47,7 +47,8 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
   and adding a few buckets would not close the gap. Resolving it needs a decision recorded in an ADR (the reference
   set or the bucket design); gates are not changed without one.
 - **The merged package is about the sum of its parts**: deduplication failed (a recipe that is not deterministic).
-- **Download over 300 MB**: int8 everywhere is about 440 MB; the table alone is 134 MB at int8 and 67 MB at int4.
+- **Download over 300 MB**: `int8_table4` zips to 350 MB (measured); `int8`, with the table at int8 too, is about
+  60 MB more. The table alone is 134 MB at int8 and 75 MB at int4 (blocks of 32).
 - **`MLModelConfiguration's .functionName property must be nil unless the model type is ML Program`** when loading an
   image function on `CPU_AND_NE`, preceded on stdout by `E5RT ... MILCompilerForANE error ... ANECCompile() FAILED`:
   the Neural Engine compiler rejected the function and Core ML's fallback cannot load one function of a
@@ -58,5 +59,9 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
   functions (it compiles in the text functions and at budget 70). Bisection: ADR-0007, "ANE compile".
 - **int4 costs more than the cosine gate allows** (2026-10-24, single-function screens against s0): int4 on the
   text tower gives min text cosine 0.974 (blocks of 32) / 0.981 (16); int4 on the vision MLP gives min image cosine
-  0.978 (32) / 0.988 (8). The table tolerates int4 (0.9975). int8 conv weights with an int4 table hold about 0.995
-  but zip to about 330 MB (ADR-0007, "Measured variants").
+  0.978 (32) / 0.988 (8). The table tolerates int4 (0.9975). Measured on all fixtures: `vis4kv8_text8` 296 MB, min
+  cosine 0.917; `int8_table4` 350 MB, min cosine 0.991 (ADR-0007, "Measured variants").
+- **Per-block int4 vision convs run on the CPU.** In `vis4kv8_text8` every image function places its 81 int4 vision
+  convs (MLP, attention q/o, projector) and 16 GELUs on the CPU: `embed_image_70_square` takes 233 ms instead of 46.
+  The op-count Neural Engine share still reads 0.992, so check the `off_ane` op types and the latency, not only
+  `ane_fraction_min`.
