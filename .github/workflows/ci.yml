@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # check_gates_adr diffs against the base branch
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Python environment (convert group)
+        run: uv sync --group convert
+
+      - name: Python unit tests
+        run: uv run --exact --group convert pytest -q
+
+      - name: gates.toml changes come with an ADR
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          # A new branch pushed to main has no "before" commit (all zeros): compare with the parent instead.
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then BASE="HEAD~1"; fi
+          uv run --exact --group convert python -m scripts.check_gates_adr "$BASE...HEAD"
+
+      - name: No large files
+        run: uv run --exact --group convert python -m scripts.check_large_files
+
+      - name: Lint
+        run: uv run --group dev ruff check .
+
+      - name: Fixtures match MANIFEST.sha256
+        run: uv run --exact --group convert python -c "from egcm.fixtures import verify_manifest as v; p = v(); assert p == [], p"
+
+      # The 52 KB stand-in with the real I/O contract, so the Swift RuntimeTests run instead of skipping.
+      # (EndToEndTests still skip: they need the s4 package, which needs the weights. EGCM_REQUIRE_ARTIFACTS is
+      # therefore not set here.)
+      - name: Contract model for the Swift runtime tests
+        run: uv run --exact --group convert python -m stages.s5_swift.make_contract_model
+
+      - name: Swift build and test
+        working-directory: swift
+        run: swift build && swift test
+
+      # What SwiftPM consumers resolve: the root Package.swift (sources in swift/).
+      - name: Root package (SwiftPM consumers)
+        run: swift package describe >/dev/null && swift build

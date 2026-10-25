@@ -13,11 +13,11 @@ import torch
 
 from egcm.buckets import BUCKETS
 from egcm.fixtures import to_unit
+from egcm.functions import embed_ids, image_affixes
 from egcm.model.text import TextTower, rope_tables
 from egcm.model.vision import VisionEncoder
 from egcm.weights import build_vision_tower
 from stages.s0_reference.pixels import patch_positions
-from stages.s1_rewrite.parity import embed_ids, image_affixes
 
 TEXT_LAYERS = (0, 5, 23)
 VISION_LAYERS = (0, 15)

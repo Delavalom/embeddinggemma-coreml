@@ -10,6 +10,10 @@ setup:
 status:
     uv run python -m scripts.gen_status
 
+# Regenerate docs/RESULTS.md (parity, every s4 variant, s5 pixels, device benchmarks) from the reports.
+results:
+    uv run python -m scripts.gen_results
+
 # Run stage N in the environment named by line 1 of its run.py (`# group: convert` or `# group: reference`).
 # --exact makes the environment match that group alone, so reference-only packages (transformers) never
 # leak into convert stages. STATUS.md is always regenerated, and the stage's exit code is kept.
@@ -50,5 +54,6 @@ lint:
 bench-device:
     just stage 6
 
+# s7 runs in the reference group: it is the locked environment that has huggingface_hub.
 publish *flags:
-    uv run --exact --group convert python -m stages.s7_publish.run {{flags}}
+    uv run --exact --group reference python -m stages.s7_publish.run {{flags}}

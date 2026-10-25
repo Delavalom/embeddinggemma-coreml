@@ -1,0 +1,77 @@
+{
+ "info": {
+  "arguments": [
+   "devicectl",
+   "list",
+   "devices",
+   "--json-output",
+   "devices.json"
+  ],
+  "commandType": "devicectl.list.devices",
+  "environment": {},
+  "jsonVersion": 5,
+  "outcome": "success",
+  "version": "651.13.5"
+ },
+ "result": {
+  "devices": [
+   {
+    "identifier": "11111111-2222-3333-4444-555555555555",
+    "hardwareProperties": {
+     "reality": "simulated",
+     "platform": "iOS",
+     "deviceType": "iPhone",
+     "productType": "iPhone18,1",
+     "marketingName": "iPhone 17 Pro",
+     "udid": "SIM-UDID-1",
+     "cpuType": {
+      "name": "arm64",
+      "subType": 0,
+      "type": 16777228
+     }
+    },
+    "deviceProperties": {
+     "name": "Simulator",
+     "osVersionNumber": "26.5",
+     "ddiServicesAvailable": false,
+     "bootState": "shutdown"
+    },
+    "connectionProperties": {
+     "pairingState": "paired",
+     "tunnelState": "disconnected",
+     "transportType": "sameMachine"
+    },
+    "visibilityClass": "simulators"
+   },
+   {
+    "identifier": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    "hardwareProperties": {
+     "reality": "physical",
+     "platform": "iOS",
+     "deviceType": "iPhone",
+     "productType": "iPhone14,3",
+     "marketingName": "iPhone 13 Pro Max",
+     "udid": "00008110-000000000000001E",
+     "cpuType": {
+      "name": "arm64e",
+      "subType": -2147483646,
+      "type": 16777228
+     }
+    },
+    "deviceProperties": {
+     "developerModeStatus": "enabled",
+     "name": "iPhone",
+     "osVersionNumber": "27.0.1",
+     "ddiServicesAvailable": true,
+     "bootState": "booted"
+    },
+    "connectionProperties": {
+     "pairingState": "paired",
+     "tunnelState": "connected",
+     "transportType": "wired"
+    },
+    "visibilityClass": "default"
+   }
+  ]
+ }
+}

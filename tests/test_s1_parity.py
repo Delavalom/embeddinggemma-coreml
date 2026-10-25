@@ -5,10 +5,11 @@ import pytest
 import torch
 
 from egcm.buckets import BUCKETS
+from egcm.functions import embed_ids, image_affixes
 from egcm.model.embedder import TEXT_LENGTHS
 from stages.s0_reference.artifacts import image_sequence
 from stages.s1_rewrite.debug import diff, tokens
-from stages.s1_rewrite.parity import embed_ids, image_affixes, text_length
+from stages.s1_rewrite.parity import text_length
 
 SPECIAL = {"pad": 0, "bos": 2, "eos": 1, "boi": 255999, "image": 258880, "eoi": 258882}
 

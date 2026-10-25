@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from egcm.redact import relativize_text
+
 Status = Literal["running", "passed", "failed", "error"]
 Metric = float | int | str | bool | None
 
@@ -44,10 +46,12 @@ class Report(BaseModel):
 
 
 def write_report(r: Report, directory: Path) -> Path:
-    """Write report.json atomically (temp file + os.replace), so readers never see a partial file."""
+    """Write report.json atomically (temp file + os.replace), so readers never see a partial file. Paths inside the
+    repo are written repo-relative and the home folder as "~" (egcm.redact), so a report can be committed or
+    published as is."""
     p = Path(directory) / "report.json"
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(r.model_dump_json(indent=2) + "\n")
+    tmp.write_text(relativize_text(r.model_dump_json(indent=2)) + "\n")
     os.replace(tmp, p)
     return p
 

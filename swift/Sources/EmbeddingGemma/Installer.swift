@@ -3,11 +3,22 @@ import Synchronization
 
 /// One install of `repo`/`revision` into a store (see `ModelStore` for the guarantees).
 struct Installer: Sendable {
+  /// What `base` publishes.
+  enum Layout: Sendable {
+    /// `files.json` and every file on its own; `manifest` supplies the bytes of `files.json` instead of fetching them.
+    case files(manifest: Data?)
+    /// `manifest.json` and the one archive it names (the app download).
+    case archive
+    /// A local folder that already holds the unpacked layout: moved in place, only the package is compiled.
+    case adopt(URL)
+  }
+
   let store: ModelStore
   let base: URL
   let repo: String
   let revision: String
-  let manifest: Data?
+  let layout: Layout
+  /// Pins `files.json` (`.files`) or `manifest.json` (`.archive`).
   let expectedManifestSHA256: String?
   let progress: (@Sendable (InstallProgress) -> Void)?
 
@@ -50,7 +61,79 @@ struct Installer: Sendable {
     var marker = InstallMarker(repo: repo, revision: revision, filesSHA256: nil, complete: false)
     try marker.write(partial)
 
-    let manifestBytes = try await manifestData(into: partial)
+    let source: URL  // the folder holding the package and the tokenizer
+    switch layout {
+    case .files(let manifest):
+      try await downloadFiles(manifest, files: files, partial: partial, repoDir: repoDir, marker: &marker)
+      source = files
+    case .archive:
+      source = try await downloadArchive(files: files, partial: partial, repoDir: repoDir, marker: &marker)
+    case .adopt(let folder):
+      try adopt(folder, into: files)
+      source = files
+    }
+
+    let compiled = partial.appending(path: ModelStore.compiledName)
+    let tmp: URL
+    do { tmp = try await store.compiler(source.appending(path: ModelStore.packageName)) } catch {
+      if case .adopt(let folder) = layout { try? fm.moveItem(at: files, to: folder) }  // give the caller's folder back
+      if error is CancellationError { throw error }
+      throw EmbeddingGemmaError.isOutOfSpace(error) ? EmbeddingGemmaError.storageFailed(underlying: error)
+        : EmbeddingGemmaError.modelLoadFailed(underlying: error)
+    }
+    try fm.moveItem(at: tmp, to: compiled)
+    try fm.moveItem(at: source.appending(path: ModelStore.tokenizerDir), to: partial.appending(path: ModelStore.tokenizerDir))
+    for dir in [files, source] where fm.fileExists(atPath: dir.path) { try fm.removeItem(at: dir) }  // compiled
+    marker.complete = true
+    try marker.write(partial)
+    return try promote(partial)
+  }
+
+  /// `manifest.json`, then the archive it names (resumable, size and SHA-256 checked), extracted into
+  /// `partial/unpacked` with the AppleArchive framework. Returns that folder.
+  private func downloadArchive(files: URL, partial: URL, repoDir: URL, marker: inout InstallMarker) async throws -> URL {
+    let bytes = try await manifestData(named: ArchiveManifest.fileName, into: partial)
+    let sha = Checksums.sha256(data: bytes)
+    if let expected = expectedManifestSHA256, expected != sha {
+      throw EmbeddingGemmaError.checksumMismatch(file: ArchiveManifest.fileName)
+    }
+    let manifest: ArchiveManifest
+    do { manifest = try ArchiveManifest.decode(bytes) } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
+    marker.filesSHA256 = sha
+    try marker.write(partial)
+
+    try adoptStalePartials(into: files, repoDir: repoDir, except: partial)
+    let unpacked = manifest.unpackedSize ?? 2 * manifest.size
+    let need = manifest.size + 2 * unpacked  // the archive, its contents, the compiled model
+    if let available = store.availableCapacity(store.root), available < need {
+      throw EmbeddingGemmaError.insufficientStorage(required: need, available: available)
+    }
+    let entry = manifest.entry
+    try await VerifiedDownload.fetch(entry, base: base, into: files, fetcher: store.fetcher) { got in
+      progress?(InstallProgress(completedBytes: min(got, entry.size), totalBytes: entry.size))
+    }
+    progress?(InstallProgress(completedBytes: entry.size, totalBytes: entry.size))
+    let out = partial.appending(path: "unpacked")
+    do {
+      try ModelArchive.extract(files.appending(path: entry.path), into: out)
+      for required in Self.requiredFiles where !FileManager.default.fileExists(atPath: out.appending(path: required).path) {
+        throw ManifestError.missing(required)
+      }
+    } catch {
+      throw EmbeddingGemmaError.isOutOfSpace(error) ? EmbeddingGemmaError.storageFailed(underlying: error)
+        : EmbeddingGemmaError.downloadFailed(underlying: error)
+    }
+    try FileManager.default.removeItem(at: files)  // the archive is unpacked; free its space before compiling
+    return out
+  }
+
+  /// `files.json`, then every file it lists (each resumable, size and SHA-256 checked) into `files`.
+  private func downloadFiles(_ supplied: Data?, files: URL, partial: URL, repoDir: URL,
+                             marker: inout InstallMarker) async throws {
+    let manifestBytes: Data
+    if let supplied { manifestBytes = supplied } else {
+      manifestBytes = try await manifestData(named: FilesManifest.fileName, into: partial)
+    }
     let sha = Checksums.sha256(data: manifestBytes)
     if let expected = expectedManifestSHA256, expected != sha {
       throw EmbeddingGemmaError.checksumMismatch(file: FilesManifest.fileName)
@@ -82,30 +165,15 @@ struct Installer: Sendable {
       progress?(InstallProgress(completedBytes: done, totalBytes: total))
     }
     try removeUnlisted(in: files, keeping: Set(entries.map(\.path)))
-
-    let compiled = partial.appending(path: ModelStore.compiledName)
-    let tmp: URL
-    do { tmp = try await store.compiler(files.appending(path: ModelStore.packageName)) } catch {
-      if error is CancellationError { throw error }
-      throw EmbeddingGemmaError.isOutOfSpace(error) ? EmbeddingGemmaError.storageFailed(underlying: error)
-        : EmbeddingGemmaError.modelLoadFailed(underlying: error)
-    }
-    try fm.moveItem(at: tmp, to: compiled)
-    try fm.moveItem(at: files.appending(path: ModelStore.tokenizerDir), to: partial.appending(path: ModelStore.tokenizerDir))
-    try fm.removeItem(at: files)  // the package is compiled; drop the download
-    marker.complete = true
-    try marker.write(partial)
-    return try promote(partial)
   }
 
-  /// `files.json`: the supplied bytes, or fetched fresh into the attempt folder (never reused: it is what every
-  /// other file is checked against).
-  private func manifestData(into partial: URL) async throws -> Data {
-    if let manifest { return manifest }
-    let url = partial.appending(path: FilesManifest.fileName)
+  /// `files.json` or `manifest.json`, fetched fresh into the attempt folder (never reused: it is what everything
+  /// else is checked against).
+  private func manifestData(named name: String, into partial: URL) async throws -> Data {
+    let url = partial.appending(path: name)
     do {
-      try await store.fetcher.fetch(base.appending(path: FilesManifest.fileName), to: url,
-                                    resumeFile: partial.appending(path: "files.json.resume"), progress: nil)
+      try await store.fetcher.fetch(base.appending(path: name), to: url,
+                                    resumeFile: partial.appending(path: "\(name).resume"), progress: nil)
       return try Data(contentsOf: url)
     } catch is CancellationError { throw CancellationError() } catch {
       throw EmbeddingGemmaError.downloadFailed(underlying: error)

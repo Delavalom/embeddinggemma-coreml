@@ -45,18 +45,24 @@ STAGE_INPUTS: dict[str, StageInputs] = {
 # gates.py, scripts/) is deliberately absent: changing how reports are written does not change what a stage
 # computes. The stage's own [table] in gates.toml is hashed as well (see gate_table); other tables are not.
 _LOCK = ("pyproject.toml", "uv.lock")
-_REWRITE = ("egcm/model", "egcm/config.py", "egcm/weights.py")
+_REWRITE = ("egcm/model", "egcm/config.py", "egcm/weights.py", "egcm/functions.py")
+_BUILD = ("egcm/convert.py", "egcm/parts.py", "egcm/mfmerge.py", "egcm/evaluate.py")  # Core ML stages s2-s4
 _COMPARE = ("egcm/buckets.py", "egcm/metrics.py", "egcm/fixtures.py", "egcm/paths.py")
 STAGE_CODE: dict[str, tuple[str, ...]] = {
     "s0_reference": ("stages/s0_reference", "egcm/buckets.py", "egcm/fixtures.py", "egcm/paths.py", *_LOCK),
     # s1 also checks s0's recorded patch positions with s0's own pixels.py
     "s1_rewrite": ("stages/s1_rewrite", "stages/s0_reference/pixels.py", *_REWRITE, *_COMPARE, *_LOCK),
-    "s2_coreml_fp32": ("stages/s2_coreml_fp32", "egcm/convert.py", *_REWRITE, *_COMPARE, *_LOCK),
-    "s3_coreml_ane": ("stages/s3_coreml_ane", "egcm/convert.py", "egcm/probe.py", *_REWRITE, *_COMPARE, *_LOCK),
-    "s4_compress": ("stages/s4_compress", "egcm/compress.py", "egcm/convert.py", *_REWRITE, *_COMPARE, *_LOCK),
-    "s5_swift": ("stages/s5_swift", "swift", *_COMPARE, *_LOCK),
-    "s6_device": ("stages/s6_device", "swift", "Examples", "egcm/metrics.py", "egcm/paths.py", *_LOCK),
-    "s7_publish": ("stages/s7_publish", "swift", "egcm/paths.py", *_LOCK),
+    "s2_coreml_fp32": ("stages/s2_coreml_fp32", *_BUILD, *_REWRITE, *_COMPARE, *_LOCK),
+    "s3_coreml_ane": ("stages/s3_coreml_ane", *_BUILD, "egcm/placement.py", "egcm/probe.py", "egcm/e5cache.py",
+                      "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
+    "s4_compress": ("stages/s4_compress", "egcm/compress.py", *_BUILD, "egcm/placement.py", "egcm/e5cache.py",
+                    "egcm/e5prune.py", "egcm/ranking.py", "egcm/archive.py", *_REWRITE, *_COMPARE, *_LOCK),
+    # s5-s7 take s4's package and device archive through egcm/published.py and egcm/manifest.py
+    "s5_swift": ("stages/s5_swift", "swift", "egcm/published.py", "egcm/manifest.py", *_COMPARE, *_LOCK),
+    "s6_device": ("stages/s6_device", "swift", "Examples", "egcm/metrics.py", "egcm/paths.py", "egcm/published.py",
+                  "egcm/manifest.py", "egcm/buckets.py", *_LOCK),
+    "s7_publish": ("stages/s7_publish", "swift", "egcm/paths.py", "egcm/published.py", "egcm/manifest.py",
+                   "egcm/buckets.py", *_LOCK),
 }
 
 
