@@ -8,10 +8,20 @@ import Testing
   #expect(EmbeddingTask.clustering.prompt == "task: clustering | query: ")
 }
 
-@Test func loadIsNotImplementedYet() async {
+@Test(arguments: [0, -1, 769])
+func invalidDimensionsAreRejectedBeforeAnyDownload(dimensions: Int) async {
+  let store = ModelStore(root: TestSupport.tempDir(), fetcher: CountingFetcher())
   await #expect(throws: EmbeddingGemmaError.self) {
-    _ = try await EmbeddingGemma.load(.huggingFace(revision: EmbeddingGemma.defaultRevision))
+    _ = try await EmbeddingGemma.load(.huggingFace(revision: "r"), dimensions: dimensions, store: store)
   }
+}
+
+@Test func missingLocalFolderIsADownloadError() async {
+  let error = await #expect(throws: EmbeddingGemmaError.self) {
+    _ = try await EmbeddingGemma.load(.file(TestSupport.tempDir().appending(path: "nope")),
+                                      store: ModelStore(root: TestSupport.tempDir()))
+  }
+  guard case .downloadFailed = error else { Issue.record("got \(String(describing: error))"); return }
 }
 
 /// Regression: our task enum must not shadow `Swift.Task` for importers.
