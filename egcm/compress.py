@@ -10,11 +10,13 @@ A recipe quantizes two kinds of constants and leaves every other one FP16:
   parameters; per-block int4 cannot split it and coremltools skips it);
 - the embedding table (262,144 x 512, the `gather` input of the text functions), set separately.
 Position embeddings, RoPE tables, the image affixes, norm weights and biases stay FP16: they feed elementwise ops, are
-small (about 20 MB over all 14 functions at FP16) and are what int4 would hurt most.
+small (29 MB over all 14 functions at FP16) and are what int4 would hurt most.
 
-The Neural Engine compiler rejects per-block int4 on the vision tower's attention k and v projections (ANECCompile()
-FAILED; Core ML then cannot load the function on CPU_AND_NE, see ADR-0007 "ANE compile"), so int4 recipes keep those
-at int8 per-channel. Per-channel int4 and int8 there compile; q and o compile at per-block int4.
+The Neural Engine compiler (M1 Pro, macOS 26) rejects some per-block int4 weights (ANECCompile() FAILED; Core ML
+then cannot load that function of a multifunction package on CPU_AND_NE; ADR-0007 "ANE compile"): the vision
+attention k and v projections (block 32 or 64) at every image budget, and the text tower inside the budget-280 image
+functions (it compiles in the text functions and at budget 70). int8 compiles everywhere. So the int4 recipe keeps the
+text tower (which also needs int8 for accuracy) and the vision k/v projections at int8.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ import coremltools.optimize.coreml as cto
 # Constants with fewer elements are never quantized (coremltools' default threshold is 2048).
 THRESHOLD = 2048
 VISION_ATTN_KV = r"^vision_encoder_layers_\d+_attn_[kv]_weight"
+TEXT_TOWER = r"^(?!vision_)"  # every conv weight that is not the vision tower's
 
 
 def _int8() -> cto.OpLinearQuantizerConfig:
@@ -78,9 +81,9 @@ def _int4b32():
 
 # name -> (description, compress(mlmodel) -> mlmodel), smallest first. Measured sizes and accuracy: ADR-0007.
 RECIPES: dict[str, tuple[str, Callable[[ct.models.MLModel], ct.models.MLModel]]] = {
-    "int4b32_kv8": ("int4 per-block (32) conv weights and table; vision attention k/v int8 per-channel (Neural "
-                    "Engine compiler); tables and norms FP16",
-                    _recipe(_int4b32, _int4b32, ((VISION_ATTN_KV, _int8),))),
+    "vis4kv8_text8": ("int4 per-block (32) vision tower and table; vision attention k/v and the text tower int8 "
+                      "per-channel (Neural Engine compiler); tables and norms FP16",
+                      _recipe(_int4b32, _int4b32, ((VISION_ATTN_KV, _int8), (TEXT_TOWER, _int8)))),
     "int8_table4": ("int8 per-channel conv weights, int4 per-block (32) table; tables and norms FP16",
                     _recipe(_int8, _int4b32)),
     "int8": ("int8 per-channel conv weights and table; tables and norms FP16", _recipe(_int8, _int8)),

@@ -14,8 +14,8 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
    quantization only (k-means palettization needs scikit-learn or kmeans1d, which are not in the lock).
 2. For each variant, smallest first: contract check, zip (the download), compile, every fixture with `CPU_AND_NE`,
    Neural Engine placement, latency. The first variant that passes every gate wins.
-3. Variants (`egcm.compress.RECIPES`, smallest first): `int4b32_kv8` (int4 blocks of 32 for conv weights and the
-   table, vision attention k/v at int8), `int8_table4` (int8 per-channel conv weights, int4 table), `int8` (int8
+3. Variants (`egcm.compress.RECIPES`, smallest first): `vis4kv8_text8` (int4 blocks of 32 for the vision tower and
+   the table; vision attention k/v and the text tower at int8), `int8_table4` (int8 per-channel conv weights, int4 table), `int8` (int8
    conv weights and table). Only conv weights and the table are quantized; position embeddings, RoPE tables, the
    image affixes, norms and biases stay FP16. `fp16` is a measure-only baseline (`--measure`).
 4. `--measure a,b,...` evaluates named variants without the stage runner (`measure/measurement.json`);
@@ -52,9 +52,10 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
   image function on `CPU_AND_NE`, preceded on stdout by `E5RT ... MILCompilerForANE error ... ANECCompile() FAILED`:
   the Neural Engine compiler rejected the function and Core ML's fallback cannot load one function of a
   multifunction package. A single-function model in the same state loads silently through the fallback (slowly), so
-  check the log for `ANECCompile() FAILED` (C++ output, flushed when the process exits). Cause found 2026-10-24:
-  per-block int4 (block 32 or 64) on the vision attention k or v weights; per-channel int4 and int8 compile there, q
-  and o compile at per-block int4. Bisection: ADR-0007, "ANE compile".
+  check the log for `ANECCompile() FAILED` (C++ output, flushed when the process exits). Causes found 2026-10-24:
+  per-block int4 (block 32 or 64) on the vision attention k or v weights (any budget; per-channel int4 and int8
+  compile, q and o compile at per-block int4), and per-block int4 on the text tower inside the budget-280 image
+  functions (it compiles in the text functions and at budget 70). Bisection: ADR-0007, "ANE compile".
 - **int4 costs more than the cosine gate allows** (2026-10-24, single-function screens against s0): int4 on the
   text tower gives min text cosine 0.974 (blocks of 32) / 0.981 (16); int4 on the vision MLP gives min image cosine
   0.978 (32) / 0.988 (8). The table tolerates int4 (0.9975). int8 conv weights with an int4 table hold about 0.995

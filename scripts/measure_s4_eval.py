@@ -1,7 +1,7 @@
 """s4 measurements without the per-function placement analysis, except for the variants named after --placement.
 
     caffeinate -i -s uv run --exact --group convert python -m scripts.measure_s4_eval \\
-        int4b32_kv8,fp16,int8_table4 --placement int4b32_kv8
+        vis4kv8_text8,fp16,int8_table4 --placement vis4kv8_text8
 
 `stages.s4_compress.run --measure` spends about 90 minutes per variant on `ane_placement_per_function` (14
 functions); placement doesn't change the ranking metrics, and s3 already recorded the FP16 placement. This builds (or
