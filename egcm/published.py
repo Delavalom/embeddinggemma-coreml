@@ -1,4 +1,7 @@
-"""The published model folder: the layout `ModelStore` installs from (a Hugging Face repo or a local folder).
+"""The published model folder, and what s4 shipped.
+
+The app downloads `manifest.json` + `EmbeddingGemma2.aar` (egcm.manifest). The plain layout (`assemble`) is what s6
+bundles in the demo app and what Python users download:
 
     files.json                               every file below, with size and sha256 (FilesManifest in Swift)
     EmbeddingGemma2.mlpackage/**             the s4 package, uncompressed
@@ -41,26 +44,39 @@ class Shipped:
     """What s4 ships, as its report records it."""
 
     package: Path  # artifacts/s4_compress/<details.package>
+    archive: Path  # artifacts/s4_compress/<details.device_archive>: the gated device download (egcm.archive)
+    archive_sha256: str  # checksums.json "archive"
     recipe: str  # details.winner: the first egcm.compress.RECIPES entry that passed every s4 gate (ADR-0007)
-    download_mb: float | None  # the zipped package (metric max_download_mb)
+    download_mb: float | None  # the archive (metric max_download_mb)
     max_download_mb: float | None  # the gate it was checked against (gates.toml [s4_compress], as recorded)
+    functions: tuple[str, ...] = ()  # the package's function names (details.build.packages[recipe].functions)
 
 
 def shipped(root: Path | None = None) -> Shipped:
     """The package s4 shipped, read from artifacts/s4_compress/report.json.
 
-    s4 renames its winning recipe to `details.package`. A failed s4 still leaves its closest variant there, so a
-    report without `details.winner` is refused rather than trusted."""
+    s4 renames its winning recipe to `details.package` and its device archive to `details.device_archive`, with the
+    archive's sha256 in checksums.json. A failed s4 still leaves its closest variant there, so a report without
+    `details.winner` is refused rather than trusted."""
     artifacts = ARTIFACTS if root is None else Path(root) / "artifacts"
     path = artifacts / S4_STAGE / "report.json"
     if not path.is_file():
         raise FileNotFoundError(f"{path} does not exist; run `just stage 4`")
     r = read_report(path)
-    winner, name = r.details.get("winner"), r.details.get("package")
+    winner, name, aar = r.details.get("winner"), r.details.get("package"), r.details.get("device_archive")
     if not winner or not name:
         raise RuntimeError(f"s4 shipped nothing (status {r.status!r}, winner {winner!r}); rerun `just stage 4`")
-    return Shipped(package=artifacts / S4_STAGE / name, recipe=winner, download_mb=r.metrics.get("max_download_mb"),
-                   max_download_mb=r.gate_values.get("max_download_mb"))
+    if not aar:
+        raise RuntimeError("the s4 report names no device_archive (made before egcm.archive); rerun `just stage 4`")
+    d = artifacts / S4_STAGE
+    try:
+        sha = json.loads((d / "checksums.json").read_text())["archive"][aar]
+    except (OSError, ValueError, KeyError) as e:
+        raise RuntimeError(f"{d / 'checksums.json'} has no archive sha256 for {aar} ({e!r}); rerun `just stage 4`")
+    functions = (r.details.get("build", {}).get("packages", {}).get(winner) or {}).get("functions") or ()
+    return Shipped(package=d / name, archive=d / aar, archive_sha256=sha, recipe=winner,
+                   download_mb=r.metrics.get("max_download_mb"), max_download_mb=r.gate_values.get("max_download_mb"),
+                   functions=tuple(sorted(functions)))
 
 
 def sha256_file(p: Path) -> str:
@@ -84,10 +100,18 @@ def files_manifest(root: Path) -> list[dict]:
 
 
 def write_files_manifest(root: Path) -> str:
-    """Writes root/files.json and returns its sha256 (what `defaultFilesManifestSHA256` pins)."""
+    """Writes root/files.json and returns its sha256 (the `.file` source hashes it into `modelRevision`)."""
     data = (json.dumps(files_manifest(root), indent=2, sort_keys=True) + "\n").encode()
     (Path(root) / FILES_JSON).write_bytes(data)
     return hashlib.sha256(data).hexdigest()
+
+
+def check_tokenizer(d: Path) -> Path:
+    """`d` if both tokenizer files in it match HF_REVISION's sha256, else RuntimeError."""
+    bad = [n for n, sha in TOKENIZER_FILES.items() if not (d / n).is_file() or sha256_file(d / n) != sha]
+    if bad:
+        raise RuntimeError(f"tokenizer files in {d} do not match HF_REVISION: {bad}")
+    return d
 
 
 def tokenizer_source(root: Path | None = None) -> Path:
@@ -101,10 +125,7 @@ def tokenizer_source(root: Path | None = None) -> Path:
     ]
     for d in candidates:
         if all((d / name).is_file() for name in TOKENIZER_FILES):
-            bad = [n for n, sha in TOKENIZER_FILES.items() if sha256_file(d / n) != sha]
-            if bad:
-                raise RuntimeError(f"tokenizer files in {d} do not match HF_REVISION: {bad}")
-            return d
+            return check_tokenizer(d)
     raise FileNotFoundError(
         "no tokenizer files found; run `just stage 0` (artifacts/hf) or `swift test` in swift/ "
         f"(artifacts/tokenizer). Looked in: {', '.join(str(c) for c in candidates)}"
@@ -130,3 +151,4 @@ def assemble(package: Path, tokenizer: Path, out: Path) -> str:
     for name in TOKENIZER_FILES:
         shutil.copyfile(Path(tokenizer) / name, out / TOKENIZER_DIR / name)
     return write_files_manifest(out)
+

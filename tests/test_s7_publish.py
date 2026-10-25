@@ -11,6 +11,7 @@ from egcm.report import Report, read_report, write_report
 from stages.s7_publish import run as s7
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
+SHAS = {"files_json_sha256": "f" * 64, "manifest_json_sha256": "e" * 64}
 
 
 class Untouchable:
@@ -137,24 +138,24 @@ def test_publish_order_with_fakes(tmp_path, monkeypatch):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "RESULTS.md").write_text("| parity |\n")
     (tmp_path / s7.DEFAULT_MODEL_SWIFT).parent.mkdir(parents=True)
-    monkeypatch.setattr(s7, "build_upload", lambda root, repo, out: "f" * 64)
+    monkeypatch.setattr(s7, "build_upload", lambda root, repo, tag, out: SHAS)
     hf = FakeHF()
     run, calls = fake_runner()
     details = s7.publish(tmp_path, "me/model", "v1.0.0", s7.Publisher(run=run, hf=hf))
-    assert details == {"hf_repo": "me/model", "revision": SHA, "files_json_sha256": "f" * 64, "tag": "v1.0.0"}
+    assert details == {"hf_repo": "me/model", "revision": SHA, **SHAS, "tag": "v1.0.0"}
     assert hf.calls[0] == ("create_repo", {"repo_id": "me/model", "repo_type": "model", "private": False,
                                            "exist_ok": True})
     assert hf.calls[1][0] == "upload_folder"
     swift = (tmp_path / s7.DEFAULT_MODEL_SWIFT).read_text()
     assert 'defaultRepo = "me/model"' in swift and f'defaultRevision = "{SHA}"' in swift
-    assert f'defaultFilesManifestSHA256: String? = "{"f" * 64}"' in swift
+    assert f'defaultManifestSHA256: String? = "{"e" * 64}"' in swift
     assert [c[:2] for c in calls] == [["git", "add"], ["git", "commit"], ["git", "tag"], ["gh", "repo"],
                                       ["git", "push"], ["git", "push"], ["gh", "release"]]
     assert "--accept-visibility-change-consequences" in calls[3]
 
 
 def test_publish_rejects_an_upload_without_a_commit_sha(tmp_path, monkeypatch):
-    monkeypatch.setattr(s7, "build_upload", lambda root, repo, out: "f" * 64)
+    monkeypatch.setattr(s7, "build_upload", lambda root, repo, tag, out: SHAS)
     hf = FakeHF()
     hf.upload_folder = lambda **kw: type("CommitInfo", (), {"oid": "main"})()
     with pytest.raises(RuntimeError, match="no commit SHA"):

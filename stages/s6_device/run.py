@@ -19,7 +19,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from egcm import published
+from egcm import manifest, published
 from egcm.gates import targets
 from egcm.paths import ROOT, stage_dir
 from egcm.report import Report
@@ -117,12 +117,14 @@ def summarize(results: list[dict], target_ms_70: float) -> tuple[dict, dict]:
 def make_fill(args: argparse.Namespace):
     def fill(report: Report) -> None:
         out = stage_dir(STAGE)
-        if args.package is None:  # what s4's report says it shipped
+        if args.package is None:  # s4's device archive, unpacked (sha256-checked): the bytes a phone downloads
             s4 = published.shipped()
-            package, recipe = s4.package, s4.recipe
+            unpacked = manifest.unpack(s4.archive, out / "unpacked", s4.archive_sha256)
+            package, recipe = unpacked / published.PACKAGE_NAME, s4.recipe
+            tokenizer = published.check_tokenizer(unpacked / published.TOKENIZER_DIR)
         else:
-            package, recipe = Path(args.package), None
-        files_sha = published.assemble(package, published.tokenizer_source(), MODEL_DIR)
+            package, recipe, tokenizer = Path(args.package), None, published.tokenizer_source()
+        files_sha = published.assemble(package, tokenizer, MODEL_DIR)
         expected_revision = "file-" + files_sha[:16]  # EmbeddingGemma.modelRevision for a .file source
         log(f"bundling {package} as {MODEL_DIR} (files.json {files_sha[:16]})")
         ctl = Devicectl()

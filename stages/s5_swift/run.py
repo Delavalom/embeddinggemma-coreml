@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from egcm import published
+from egcm import manifest, published
 from egcm.buckets import BUDGETS, choose_bucket
 from egcm.fixtures import S0_DIR, load_images, load_texts
 from egcm.paths import ARTIFACTS, FIXTURES, ROOT, stage_dir
@@ -49,11 +49,13 @@ def write_synthetic(folder: Path) -> dict[str, dict]:
     return refs
 
 
-def run_parity(model: Path, out: Path, synthetic_dir: Path, compute_units: str, limit: int) -> dict:
-    """Build and run egcm-parity (release), return its JSON."""
+def run_parity(model: Path, out: Path, synthetic_dir: Path, compute_units: str, limit: int,
+               tokenizer: Path | None = None) -> dict:
+    """Build and run egcm-parity (release), return its JSON. `tokenizer` defaults to the verified local copy."""
     cmd = ["swift", "run", "-c", "release", "egcm-parity", "--model", str(model),
-           "--tokenizer", str(published.tokenizer_source()), "--fixtures", str(FIXTURES), "--out", str(out),
-           "--synthetic", str(synthetic_dir), "--compute-units", compute_units, "--limit", str(limit)]
+           "--tokenizer", str(tokenizer or published.tokenizer_source()), "--fixtures", str(FIXTURES),
+           "--out", str(out), "--synthetic", str(synthetic_dir), "--compute-units", compute_units,
+           "--limit", str(limit)]
     print("$ " + " ".join(cmd), file=sys.stderr, flush=True)
     subprocess.run(cmd, cwd=SWIFT, check=True)
     return json.loads(out.read_text())
@@ -95,12 +97,12 @@ def compare(parity: dict, s0: Path, synthetic_refs: dict, limit: int = 0) -> tup
 
 
 def measure(model: Path, out_dir: Path, s0: Path = S0_DIR, compute_units: str = "cpuAndNeuralEngine",
-            limit: int = 0) -> tuple[dict, dict]:
+            limit: int = 0, tokenizer: Path | None = None) -> tuple[dict, dict]:
     if not (model / "Manifest.json").is_file():
         raise FileNotFoundError(f"{model} is not an .mlpackage: run `just stage 4`")
     t0 = time.monotonic()
     refs = write_synthetic(out_dir / "synthetic")
-    parity = run_parity(model, out_dir / "parity.json", out_dir / "synthetic", compute_units, limit)
+    parity = run_parity(model, out_dir / "parity.json", out_dir / "synthetic", compute_units, limit, tokenizer)
     metrics, details = compare(parity, s0, refs, limit)
     details |= {"model": str(model), "parity_json": str(out_dir / "parity.json"), "limit": limit,
                 "seconds": round(time.monotonic() - t0, 1)}
@@ -108,10 +110,14 @@ def measure(model: Path, out_dir: Path, s0: Path = S0_DIR, compute_units: str = 
 
 
 def fill(report: Report) -> None:
-    s4 = published.shipped()  # the package and recipe s4's report says it shipped
-    metrics, details = measure(s4.package, stage_dir(STAGE))
+    """Runs on s4's device archive, unpacked (sha256-checked): the package and tokenizer bytes a phone gets."""
+    s4, out = published.shipped(), stage_dir(STAGE)
+    unpacked = manifest.unpack(s4.archive, out / "unpacked", s4.archive_sha256)
+    tokenizer = published.check_tokenizer(unpacked / published.TOKENIZER_DIR)
+    metrics, details = measure(unpacked / published.PACKAGE_NAME, out, tokenizer=tokenizer)
     report.metrics |= metrics
-    report.details |= details | {"s4_recipe": s4.recipe}
+    report.details |= details | {"s4_recipe": s4.recipe, "device_archive": s4.archive.name,
+                                 "device_archive_sha256": s4.archive_sha256}
     print(json.dumps(metrics), flush=True)
 
 

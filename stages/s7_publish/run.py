@@ -25,7 +25,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from egcm import published
+from egcm import manifest, published
 from egcm.paths import ROOT, STAGES
 from egcm.provenance import stale_reason
 from egcm.report import Report, read_report
@@ -106,20 +106,25 @@ def preflight(root: Path, tag: str, pub: Publisher) -> list[str]:
     except Exception as e:  # no report, unreadable, or no winner
         out.append(f"s4_compress: {e}")
     else:
-        if not (s4.package / "Manifest.json").is_file():
-            out.append(f"{s4.package} (s4 recipe {s4.recipe}) is missing; rerun `just stage 4`")
+        for p in (s4.package / "Manifest.json", s4.archive):
+            if not p.is_file():
+                out.append(f"{p} (s4 recipe {s4.recipe}) is missing; rerun `just stage 4`")
+        try:
+            manifest.check_functions(s4.functions)
+        except ValueError as e:
+            out.append(f"s4_compress: {e}")
     return out
 
 
-def render_default_model(repo: str, revision: str, files_sha256: str) -> str:
+def render_default_model(repo: str, revision: str, manifest_sha256: str) -> str:
     return f"""// The published Core ML model. Written by stages/s7_publish (Task 22): the Hugging Face repo, the commit
-// SHA of the upload and the sha256 of its files.json.
+// SHA of the upload and the sha256 of its manifest.json.
 public extension EmbeddingGemma {{
   static let defaultRepo = "{repo}"
   static let defaultRevision = "{revision}"
-  /// sha256 of `files.json` at `defaultRevision`. When set, loading the default model verifies `files.json` against
-  /// it (on top of the pinned commit), so a compromised or rewritten Hub file is rejected.
-  static let defaultFilesManifestSHA256: String? = "{files_sha256}"
+  /// sha256 of `manifest.json` at `defaultRevision`. When set, loading the default model verifies `manifest.json`
+  /// against it (on top of the pinned commit), so a compromised or rewritten Hub file is rejected.
+  static let defaultManifestSHA256: String? = "{manifest_sha256}"
 }}
 """
 
@@ -127,7 +132,7 @@ public extension EmbeddingGemma {{
 def model_card(repo: str, results_md: str, s4: published.Shipped | None = None) -> str:
     weights = ""
     if s4 is not None:
-        mb = "" if s4.download_mb is None else f", {s4.download_mb:.0f} MB zipped"
+        mb = "" if s4.download_mb is None else f", {s4.download_mb:.0f} MB device download"
         weights = f"\nWeights: s4 recipe `{s4.recipe}`{mb}. See the s4 table below.\n"
     return f"""---
 license: apache-2.0
@@ -142,7 +147,9 @@ tags: [coreml, embeddings, image-text, ios, neural-engine]
 model for the iPhone Neural Engine, with parity checked against the original at every stage.
 {weights}
 Use it from Swift with the `EmbeddingGemma` package (`EmbeddingGemma.load(.huggingFace(repo: "{repo}", revision:
-...))`). Every file is listed with its size and SHA-256 in `files.json` and verified on download.
+...))`). Apps download one file, `{manifest.ARCHIVE_NAME}` (an LZFSE Apple Archive of the package and the
+tokenizer), checked against its size and SHA-256 in `{manifest.MANIFEST_JSON}`. The same files are here unpacked
+for Python and other tools, each listed with its size and SHA-256 in `{published.FILES_JSON}`.
 
 License: Apache-2.0, same as the base model. See NOTICE.
 
@@ -150,20 +157,23 @@ License: Apache-2.0, same as the base model. See NOTICE.
 """
 
 
-def build_upload(root: Path, repo: str, out: Path) -> str:
-    """The upload folder: the published layout plus README.md (model card) and NOTICE. Returns files.json's sha256.
-    files.json covers the model and tokenizer only (what ModelStore downloads), so it is written first."""
+def build_upload(root: Path, repo: str, tag: str, out: Path) -> dict:
+    """The upload folder: the plain published layout (files.json covers the package and tokenizer only, so it is
+    written first), the app archive and manifest.json, README.md (model card) and NOTICE. Returns the sha256 of
+    files.json and of manifest.json."""
     s4 = published.shipped(root)
-    files_sha = published.assemble(s4.package, published.tokenizer_source(root), out)
+    tokenizer = published.tokenizer_source(root)
+    files_sha = published.assemble(s4.package, tokenizer, out)
+    manifest_sha = manifest.write(s4, out, revision=tag)  # s4's gated archive, as is
     (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text(), s4))
     shutil.copyfile(root / "NOTICE", out / "NOTICE")
-    return files_sha
+    return {"files_json_sha256": files_sha, "manifest_json_sha256": manifest_sha}
 
 
 def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     """The irreversible part, in order. Returns what to record in the report's details."""
     upload = root / "artifacts" / STAGE / "upload"
-    files_sha = build_upload(root, repo, upload)
+    shas = build_upload(root, repo, tag, upload)
     log(f"creating https://huggingface.co/{repo} (public) and uploading {upload}")
     pub.hf.create_repo(repo_id=repo, repo_type="model", private=False, exist_ok=True)
     info = pub.hf.upload_folder(repo_id=repo, repo_type="model", folder_path=str(upload),
@@ -171,7 +181,8 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     revision = getattr(info, "oid", None)
     if not revision or not _SHA.fullmatch(revision):
         raise RuntimeError(f"the upload returned no commit SHA (got {revision!r})")
-    (root / DEFAULT_MODEL_SWIFT).write_text(render_default_model(repo, revision, files_sha))
+    log(f"uploaded commit {revision}, sha256(manifest.json) {shas['manifest_json_sha256']}")
+    (root / DEFAULT_MODEL_SWIFT).write_text(render_default_model(repo, revision, shas["manifest_json_sha256"]))
     pub.check(["git", "add", str(DEFAULT_MODEL_SWIFT)])
     pub.check(["git", "commit", "-m", f"chore(release): pin the default model to {repo}@{revision[:12]}"])
     pub.check(["git", "tag", "-a", tag, "-m", f"EmbeddingGemma {tag} (model {repo}@{revision})"])
@@ -181,7 +192,9 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     pub.check(["git", "push", "origin", tag])
     pub.check(["gh", "release", "create", tag, "--title", f"EmbeddingGemma {tag}",
                "--notes-file", str(RESULTS_MD)])
-    return {"hf_repo": repo, "revision": revision, "files_json_sha256": files_sha, "tag": tag}
+    log(f"published https://huggingface.co/{repo}/resolve/{revision}/{manifest.MANIFEST_JSON} "
+        f"(sha256 {shas['manifest_json_sha256']})")
+    return {"hf_repo": repo, "revision": revision, **shas, "tag": tag}
 
 
 def make_fill(root: Path, repo: str, tag: str, pub: Publisher):
