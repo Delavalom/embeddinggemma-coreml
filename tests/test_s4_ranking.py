@@ -1,44 +1,26 @@
-"""stages/s4_compress helpers: variant metrics on synthetic vectors, gate checks, zip and checksums."""
+"""stages/s4_compress helpers: gate checks, zip and checksums (variant metrics: tests/test_ranking.py)."""
 
 import zipfile
 
-import numpy as np
-
-from egcm.fixtures import load_texts
 from stages.s4_compress import ranking
-from stages.s4_compress.run import passes
+from stages.s4_compress.run import METRIC_FOR_GATE, passes
 
 
-def fake(noise_raw: float, noise_new: float, seed: int = 0):
-    rng = np.random.default_rng(seed)
-    order = [t["id"] for t in load_texts()]
-    q = rng.normal(size=(len(order), 16))
-    texts = {"order": order, "ref": q, "emb": q + noise_new * rng.normal(size=q.shape), "cos": np.ones(len(order))}
-    images = {}
-    for b in (70, 280):
-        d = rng.normal(size=(200, 16))
-        images[b] = {"ref_bucket": d, "ref_raw": d + noise_raw * rng.normal(size=d.shape),
-                     "emb": d + noise_new * rng.normal(size=d.shape), "cos": np.ones(200)}
-    return texts, images
-
-
-def test_identical_vectors_rank_identically():
-    m = ranking.metrics(*fake(0.0, 0.0))
-    assert m["min_recall_at_10"] == 1.0 and m["min_p5_spearman_top50"] == 1.0
-    assert m["vs_bucket"]["min_recall_at_10"] == 1.0 and m["min_cosine"] == 1.0
-
-
-def test_raw_reference_includes_bucketing_cost():
-    m = ranking.metrics(*fake(noise_raw=0.5, noise_new=0.0))
-    assert m["vs_bucket"]["min_recall_at_10"] == 1.0
-    assert m["min_recall_at_10"] < 0.95  # gated metric is against the exact-aspect reference
-
-
-def test_passes_uses_each_gate_direction():
-    g = {"min_cosine": 0.99, "min_recall_at_10": 0.95, "min_p5_spearman_top50": 0.9, "max_download_mb": 300}
-    m = {"min_cosine": 0.995, "min_recall_at_10": 0.95, "min_p5_spearman_top50": 0.89, "download_mb": 301}
+def test_passes_checks_every_gate_in_its_direction():
+    g = {"min_cosine": 0.99, "min_recall_at_10": 0.95, "min_p5_spearman_top50": 0.9, "min_t2i_top1_in_top10": 0.95,
+         "max_i2i_label_p10_drop": 0.03, "max_download_mb": 360}
+    m = {"min_cosine": 0.995, "min_recall_at_10": 0.95, "min_p5_spearman_top50": 0.89, "min_t2i_top1_in_top10": 0.96,
+         "max_i2i_label_p10_drop": 0.031, "download_mb": 360.0}
     assert passes(m, g) == {"min_cosine": True, "min_recall_at_10": True, "min_p5_spearman_top50": False,
-                            "max_download_mb": False}
+                            "min_t2i_top1_in_top10": True, "max_i2i_label_p10_drop": False, "max_download_mb": True}
+
+
+def test_passes_covers_the_gates_in_gates_toml():
+    from egcm.gates import gates
+
+    g = gates("s4_compress")
+    m = {METRIC_FOR_GATE.get(k, k): v for k, v in g.items()}  # every metric exactly at its gate
+    assert set(passes(m, g)) == set(g) and all(passes(m, g).values())
 
 
 def test_zip_and_checksums(tmp_path):

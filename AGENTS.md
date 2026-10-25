@@ -56,7 +56,7 @@ They are declared as conflicting in `pyproject.toml`, so they cannot be installe
 - Recorded-only numbers (such as the s6 speed target) live in a `[stage.targets]` subtable. They are never gated; read them with `egcm.gates.targets(stage_key)`.
 - A metric that is missing, non-numeric or non-finite is a recorded gate failure, not a crash. Non-finite floats are written to JSON as the strings `"NaN"`, `"Infinity"`, `"-Infinity"` and restored on read.
 - `min_cosine` in s4 and s5 is the minimum over text and image vectors combined. s1 to s3 gate text and image separately.
-- Ranking metrics (`recall_at_k`, `spearman_topk`) take keyword arguments `ref=(queries, docs)` and `new=(queries, docs)`. s4 uses only the 120 app queries (`kind=query`), not the document-style texts.
+- Ranking metrics (`recall_at_k`, `spearman_topk`) take keyword arguments `ref=(queries, docs)` and `new=(queries, docs)`. s3 and s4 use only the 120 app queries (`kind=query`), not the document-style texts, through `egcm.ranking`; the reference for the gated ranking is s0's bucketed image vectors (ADR-0006, ADR-0007).
 
 ## Provenance and staleness
 
@@ -79,8 +79,8 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s0_reference** | Downloads the weights (revision pinned by commit SHA), runs the official `sentence-transformers` model in FP32 on CPU. Writes golden 768-d vectors, token ids, preprocessed pixel tensors and the exact image token sequence. Also lists every weight key and shape | deterministic: an in-process rerun of a sample (one image per bucket shape, a query, a document, the longest text) is bitwise identical. License recorded as Apache-2.0. Key inventory written. Enforced (raises): fixtures match the manifest, model sha256, `encode` agrees with the manual path, bit-exact pixel contract |
 | **s1_rewrite** | Our PyTorch rewrite, FP32, same inputs | min cosine ≥ 0.9999 (text and image). Strict weight load |
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
-| **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | min cosine ≥ 0.995, and ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
-| **s4_compress** | int8 weights first, then 4-bit palettization. Keep the smallest variant that passes | min cosine ≥ 0.99 (text and image combined), recall@10 ≥ 0.95, 5th-percentile Spearman ρ of the top-50 ≥ 0.9, full download ≤ 300 MB |
+| **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | text min cosine ≥ 0.995; image min cosine ≥ 0.99 and 1st percentile ≥ 0.995; recall@10 ≥ 0.95 and p5 Spearman ≥ 0.9 against the bucketed FP reference (ADR-0006); ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
+| **s4_compress** | Linear weight quantization; ships `int8_table4` (int8 weights, int4 table; ADR-0007) | min cosine ≥ 0.99 (text and image combined); recall@10 ≥ 0.95 and 5th-percentile Spearman ρ of the top-50 ≥ 0.9 against the bucketed FP reference; exact-aspect top-1 in the top 10 ≥ 0.95 and image→image category precision@10 drop ≤ 0.03 (bucketing); download ≤ 360 MB |
 | **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255; end-to-end min cosine ≥ 0.99 against s0 |
 | **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target (`[s6_device.targets]`), not gated |
 | **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
@@ -120,6 +120,7 @@ egcm/                     shared Python library
   evaluate.py             runs every s0 fixture through a compiled package (s2-s4), latency
   parts.py                builds packages one process per part and per merge (16 GB Mac), resumable, memory/disk guards
   compress.py             s4 recipes: deterministic linear quantization (int8 / int4 per block), table separately
+  ranking.py              task-level metrics vs s0 (s3, s4): cosines, ranking vs bucketed FP, bucketing fidelity
   probe.py                activation max-abs probe (s3, diagnostic)
   placement.py            Neural Engine placement per function from MLComputePlan (s3, s4)
   fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)

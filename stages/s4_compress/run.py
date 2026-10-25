@@ -1,8 +1,9 @@
 # group: convert
 """s4_compress: compressed variants of the FP16 model; keeps the smallest that passes every s4 gate.
 
-Gates (gates.toml [s4_compress]): min_cosine, min_recall_at_10, min_p5_spearman_top50, max_download_mb.
-See stages/s4_compress/README.md.
+Gates (gates.toml [s4_compress], ADR-0007): min_cosine, min_recall_at_10 and min_p5_spearman_top50 (against the
+bucketed FP reference), min_t2i_top1_in_top10 and max_i2i_label_p10_drop (bucketing, against exact-aspect),
+max_download_mb. See stages/s4_compress/README.md.
 """
 
 from __future__ import annotations
@@ -22,8 +23,10 @@ from egcm.e5prune import BundlePruner
 from egcm.evaluate import latency_ms, run_images, run_texts, text_feed
 from egcm.functions import FUNCTIONS
 from egcm.gates import gates as stage_gates
+from egcm.gates import op_for, targets
 from egcm.paths import stage_dir
 from egcm.placement import ane_placement_per_function
+from egcm.ranking import metrics as task_metrics
 from egcm.report import Report
 from egcm.stage import run_stage
 from stages.s4_compress import ranking
@@ -32,11 +35,19 @@ STAGE = "s4_compress"
 UNITS = ct.ComputeUnit.CPU_AND_NE  # the shipping configuration
 
 
+# gate key -> variant metric key, where they differ
+METRIC_FOR_GATE = {"max_download_mb": "download_mb"}
+# recorded-only target -> vs_raw (exact-aspect) metric (ADR-0007)
+TARGET_METRIC = {"t2i_recall_at_10_exact_aspect": "min_recall_at_10"}
+
+
 def passes(m: dict, gates: dict) -> dict[str, bool]:
-    return {"min_cosine": m["min_cosine"] >= gates["min_cosine"],
-            "min_recall_at_10": m["min_recall_at_10"] >= gates["min_recall_at_10"],
-            "min_p5_spearman_top50": m["min_p5_spearman_top50"] >= gates["min_p5_spearman_top50"],
-            "max_download_mb": m["download_mb"] <= gates["max_download_mb"]}
+    """Every gate of gates.toml [s4_compress] against the variant's metrics, in the key's direction."""
+    out = {}
+    for key, gate in gates.items():
+        value, op = m[METRIC_FOR_GATE.get(key, key)], op_for(key, gate)
+        out[key] = value == gate if op == "==" else value >= gate if op == ">=" else value <= gate
+    return out
 
 
 def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gates: dict, log,
@@ -50,7 +61,7 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     compile_package(pkg, compiled)
     p = PurgingPackage(compiled, UNITS)
     texts, images = run_texts(p, pad_id), run_images(p, log=log)
-    m = ranking.metrics(texts, images)
+    m = task_metrics(texts, images)
     m |= {"description": desc, "package_mb": sizes["package_mb"], "download_mb": size_mb(zipped),
           "by_function": {"text": texts["by_function"], "image": images["by_function"]}}
     m["passes"] = passes(m, gates)
@@ -63,9 +74,9 @@ def evaluate_variant(recipe: str, desc: str, sizes: dict, out, pad_id: int, gate
     del p
     ranking.remove(compiled)
     log(f"{recipe}: download {m['download_mb']:.0f} MB, min cosine {m['min_cosine']:.5f}, recall@10 "
-        f"{m['min_recall_at_10']:.3f} (vs bucket {m['vs_bucket']['min_recall_at_10']:.3f}), p5 spearman "
-        f"{m['min_p5_spearman_top50']:.3f} (vs bucket {m['vs_bucket']['min_p5_spearman_top50']:.3f}), "
-        f"passes {m['passes']}")
+        f"{m['min_recall_at_10']:.3f}, p5 spearman {m['min_p5_spearman_top50']:.3f} (vs bucketed FP); top-1 in top 10 "
+        f"{m['min_t2i_top1_in_top10']:.3f}, i2i p10 drop {m['max_i2i_label_p10_drop']:.3f}, recall@10 vs exact-aspect "
+        f"{m['vs_raw']['min_recall_at_10']:.3f}; passes {m['passes']}")
     return m
 
 
@@ -113,8 +124,10 @@ def fill(report: Report) -> None:
         ranking.zip_package(final, final_zip)
         (out / "checksums.json").write_text(json.dumps(ranking.checksums(final, final_zip), indent=1) + "\n")
     m = variants[chosen]
-    report.metrics |= {k: m[k] for k in ("min_cosine", "min_recall_at_10", "min_p5_spearman_top50")}
-    report.metrics["max_download_mb"] = m["download_mb"]
+    report.metrics |= {k: m[METRIC_FOR_GATE.get(k, k)] for k in gates}
+    # recorded only (gates.toml [s4_compress.targets]): text->image recall@10 against exact-aspect (ADR-0007)
+    report.details["targets"] = {k: {"target": v, "value": m["vs_raw"][TARGET_METRIC[k]]}
+                                 for k, v in targets(STAGE).items()}
     report.details |= {"chosen": chosen, "winner": winner, "package": final.name,
                        "seconds": round(time.monotonic() - t0, 1)}
     log(f"done: chosen {chosen} (winner {winner})")

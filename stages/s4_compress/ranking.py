@@ -1,10 +1,5 @@
-"""s4 metrics for one variant: cosines against s0, ranking of the 120 app queries over the images, download size.
-
-Ranking follows spec section 5 and ADR-0002: the reference is the official model on the *exact-aspect* images (s0
-`emb_raw`) with s0's query vectors, the new side is our package on the bucketed images with our query vectors, so
-the gate includes the cost of bucketing. The same metrics against s0's bucketed vectors (`emb_bucket`) are recorded
-as `vs_bucket` (compression cost alone) and are not gated.
-"""
+"""s4 packaging helpers: the zipped download, checksums, cleanup. The variant metrics are egcm.ranking (shared with
+s3; ADR-0006, ADR-0007)."""
 
 from __future__ import annotations
 
@@ -12,35 +7,6 @@ import hashlib
 import shutil
 import zipfile
 from pathlib import Path
-
-from egcm.buckets import BUDGETS
-from egcm.fixtures import load_texts
-from egcm.metrics import recall_at_k, spearman_topk
-
-
-def query_rows(order: list[str]) -> list[int]:
-    kinds = {t["id"]: t["kind"] for t in load_texts()}
-    return [i for i, k in enumerate(order) if kinds[k] == "query"]
-
-
-def metrics(texts: dict, images: dict) -> dict:
-    """texts / images as returned by egcm.evaluate.run_texts / run_images."""
-    q = query_rows(texts["order"])
-    q_ref, q_new = texts["ref"][q], texts["emb"][q]
-    out: dict = {"min_cosine_text": float(texts["cos"].min()),
-                 "min_cosine_image": min(float(images[b]["cos"].min()) for b in BUDGETS)}
-    out["min_cosine"] = min(out["min_cosine_text"], out["min_cosine_image"])
-    for ref_key, tag in (("ref_raw", "vs_raw"), ("ref_bucket", "vs_bucket")):
-        per = {}
-        for b in BUDGETS:
-            d_ref, d_new = images[b][ref_key], images[b]["emb"]
-            per[b] = {"recall_at_10": recall_at_k(ref=(q_ref, d_ref), new=(q_new, d_new), k=10),
-                      "p5_spearman_top50": spearman_topk(ref=(q_ref, d_ref), new=(q_new, d_new), k=50)}
-        out[tag] = {"by_budget": per, "min_recall_at_10": min(p["recall_at_10"] for p in per.values()),
-                    "min_p5_spearman_top50": min(p["p5_spearman_top50"] for p in per.values())}
-    out["min_recall_at_10"] = out["vs_raw"]["min_recall_at_10"]
-    out["min_p5_spearman_top50"] = out["vs_raw"]["min_p5_spearman_top50"]
-    return out
 
 
 def zip_package(pkg: Path, dest: Path) -> Path:

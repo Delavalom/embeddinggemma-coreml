@@ -17,6 +17,7 @@ then cannot load that function of a multifunction package on CPU_AND_NE; ADR-000
 attention k and v projections (block 32 or 64) at every image budget, and the text tower inside the budget-280 image
 functions (it compiles in the text functions and at budget 70). int8 compiles everywhere. So the int4 recipe keeps the
 text tower (which also needs int8 for accuracy) and the vision k/v projections at int8.
+Even so its int4 vision convs are placed on the CPU, and int4 costs more than the cosine gate allows.
 """
 
 from __future__ import annotations
@@ -79,18 +80,21 @@ def _int4b32():
     return _int4(32)
 
 
-# name -> (description, compress(mlmodel) -> mlmodel), smallest first. Measured sizes and accuracy: ADR-0007.
+# The stage's candidates, smallest first: name -> (description, compress(mlmodel) -> mlmodel). int8_table4 is the
+# shipping recipe (ADR-0007, accepted 2026-10-25: 350 MB download within the 360 MB limit).
 RECIPES: dict[str, tuple[str, Callable[[ct.models.MLModel], ct.models.MLModel]]] = {
+    "int8_table4": ("int8 per-channel conv weights, int4 per-block (32) table; tables and norms FP16",
+                    _recipe(_int8, _int4b32)),
+}
+
+# Measure-only variants (s4 --measure, scripts.measure_s4_eval), never stage candidates. "fp16" is the uncompressed
+# package on the Neural Engine, the baseline that separates what FP16 costs from what compression costs (ADR-0006).
+# "vis4kv8_text8" (296 MB) fails min cosine (0.917) and runs its int4 vision convs on the CPU (233 ms per image instead
+# of 46), and "int8" (about 410 MB) is over the download limit, so neither can win; measured in ADR-0007.
+MEASURE_ONLY: dict[str, tuple[str, Callable[[ct.models.MLModel], ct.models.MLModel]]] = {
+    "fp16": ("FP16, no weight compression (baseline)", lambda m: m),
     "vis4kv8_text8": ("int4 per-block (32) vision tower and table; vision attention k/v and the text tower int8 "
                       "per-channel (Neural Engine compiler); tables and norms FP16",
                       _recipe(_int4b32, _int4b32, ((VISION_ATTN_KV, _int8), (TEXT_TOWER, _int8)))),
-    "int8_table4": ("int8 per-channel conv weights, int4 per-block (32) table; tables and norms FP16",
-                    _recipe(_int8, _int4b32)),
     "int8": ("int8 per-channel conv weights and table; tables and norms FP16", _recipe(_int8, _int8)),
-}
-
-# Measure-only variants (s4 --measure), never stage candidates: "fp16" is the uncompressed FP16 package on the Neural
-# Engine, the baseline that separates what FP16 on the Neural Engine costs from what compression costs (ADR-0006).
-MEASURE_ONLY: dict[str, tuple[str, Callable[[ct.models.MLModel], ct.models.MLModel]]] = {
-    "fp16": ("FP16, no weight compression (baseline)", lambda m: m),
 }

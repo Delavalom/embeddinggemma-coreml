@@ -1,6 +1,7 @@
 # ADR-0006: Two fixture images miss the s3 FP16 gate on the Neural Engine
 
-**Status:** proposed, 2026-10-24. Not accepted: `gates.toml` is unchanged. The coordinator decides.
+**Status:** accepted, 2026-10-25, founder approved: images stay on the Neural Engine (not option 1, the GPU). See
+"Decision" at the end; proposed 2026-10-24.
 
 ## Context
 
@@ -87,3 +88,26 @@ The two low-cosine images matter little at task level: i141 is in the top 10 of 
 i161 is in 2 and changes 1 (`artifacts/s4_compress/measure/adr0006_two_images.json`). The rest of the gap (recall@10
 0.968 against 0.9975 at budget 70) comes from the other 398 images' small FP16 differences, which reorder near ties
 (ADR-0007: ranks 10 and 11 differ by about 0.0013 in score). The GPU is 2.8x slower at budget 70 and 1.3x at 280.
+
+## Decision (accepted 2026-10-25, founder approved)
+
+Images stay on the Neural Engine with the text; no GPU. The two low-cosine images (i141, i161) are accepted at task
+level: alone they leave text→image recall@10 against the bucketed FP reference at 0.9975 / 0.9992, and the whole FP16
+package gives 0.968 / 0.983 (above). The GPU was 2.8x slower at budget 70 for a gain the task does not need.
+
+`gates.toml [s3_coreml_ane]` changes in the same commit:
+
+| key | before | now |
+|---|---|---|
+| `min_cosine_text` | 0.995 | 0.995 |
+| `min_cosine_image` | 0.995 | **0.99** (a floor: the minimum over the 400 image vectors) |
+| `min_p1_cosine_image` | | **0.995** (new: the 0.995 bar on the 1st percentile, linear interpolation over the 400 image vectors, so at most about 4 images may fall below it) |
+| `min_recall_at_10` | | **0.95** (new: text→image, against the bucketed FP reference, worst budget; as s4) |
+| `min_p5_spearman_top50` | | **0.9** (new: as s4) |
+| `min_ane_fraction` | 0.95 | 0.95 |
+
+The metrics are `egcm.ranking.metrics`, shared with s4. The image minimum is not dropped: 0.99 is s4's and s5's floor,
+so FP16 alone may not use more than the whole budget the later stages allow. Measured at the time (s4's `fp16`
+baseline, the same package): min 0.99404, 1st percentile above 0.998 (the third-worst image is 0.99833), recall@10
+0.968 / 0.983, p5 Spearman 0.987 / 0.995.
+

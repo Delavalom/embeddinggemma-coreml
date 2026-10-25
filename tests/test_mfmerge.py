@@ -12,7 +12,7 @@ ct = pytest.importorskip("coremltools")
 import tiny  # noqa: E402
 
 from egcm import mfmerge  # noqa: E402
-from egcm.compress import RECIPES  # noqa: E402
+from egcm.compress import MEASURE_ONLY, RECIPES  # noqa: E402
 from egcm.convert import _merge, compile_package, contract_problems, convert, size_mb  # noqa: E402
 from egcm.evaluate import Package, text_feed  # noqa: E402
 from egcm.functions import TextFunction  # noqa: E402
@@ -30,7 +30,7 @@ def model():
     return text, table
 
 
-@pytest.mark.parametrize("variant", ["fp32", "fp16", "vis4kv8_text8"])
+@pytest.mark.parametrize("variant", ["fp32", "fp16", "int8_table4", "vis4kv8_text8"])
 def test_matches_save_multifunction(model, tmp_path, variant):
     text, table = model
     srcs = []
@@ -39,8 +39,8 @@ def test_matches_save_multifunction(model, tmp_path, variant):
         m = convert(name, TextFunction(TextEmbedder(text.tower, table, n)),
                     (torch.zeros(1, n, dtype=torch.int32), torch.ones(1, n, dtype=torch.int32)),
                     ct.precision.FLOAT32 if variant == "fp32" else ct.precision.FLOAT16)
-        if variant in RECIPES:
-            m = RECIPES[variant][1](m)
+        if variant in RECIPES | MEASURE_ONLY:
+            m = (RECIPES | MEASURE_ONLY)[variant][1](m)
         p = tmp_path / f"{name}.mlpackage"
         m.save(str(p))
         srcs.append((p, "main", name))

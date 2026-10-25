@@ -1,6 +1,7 @@
 # ADR-0007: Gate s4 compression against the bucketed FP model, and bucketing separately at the task level
 
-**Status:** proposed, 2026-10-24. Not accepted: `gates.toml` is unchanged. The coordinator decides.
+**Status:** accepted, 2026-10-25, founder approved, with the download limit raised to 360 MB and `int8_table4` as
+the shipping recipe. See "Decision (accepted)" at the end; proposed 2026-10-24.
 
 ## Context
 
@@ -35,7 +36,7 @@ matches its bucket within 2% has a cosine as low as 0.916 to its exact-aspect ve
 exact-aspect resize gives a different resolution and token count than the bucket. A few more buckets would therefore
 not lift text→image recall@10 to 0.95; only exact-grid functions (one per processor output size) would.
 
-## Decision (proposed)
+## Decision (as proposed 2026-10-24)
 
 Split the s4 gates into two families with separate references.
 
@@ -160,4 +161,29 @@ The recipes in `egcm/compress.py` (commits 8c0073d, 77d1241) therefore quantize 
 embedding table, chosen by the consuming op (position embeddings, RoPE tables, affixes, norms and biases stay FP16;
 29 MB over the 14 functions), and the int4 recipe `vis4kv8_text8` keeps the vision k/v projections and the text tower
 at int8. `embed_image_280_tall` with exactly that recipe compiles and runs on the Neural Engine.
+
+## Decision (accepted 2026-10-25, founder approved)
+
+(a) and (b) as proposed above, and the download limit raised from 300 to 360 MB: no deterministic linear recipe
+reaches the cosine gate at 300 MB ("Measured variants"), and `int8_table4` passes (a) at 350 MB with Neural Engine
+speed. `gates.toml [s4_compress]` changes in the same commit:
+
+| key | before | now |
+|---|---|---|
+| `min_cosine` | 0.99 | 0.99 |
+| `min_recall_at_10` | 0.95 against exact-aspect | 0.95 **against the bucketed FP reference** |
+| `min_p5_spearman_top50` | 0.9 against exact-aspect | 0.9 **against the bucketed FP reference** |
+| `min_t2i_top1_in_top10` | | **0.95** (new, (b): the exact-aspect top-1 image in the package's top 10, worst budget) |
+| `max_i2i_label_p10_drop` | | **0.03** (new, (b): image→image category precision@10, exact-aspect reference minus package, worst budget) |
+| `max_download_mb` | 300 | **360** |
+| `[s4_compress.targets]` | | `t2i_recall_at_10_exact_aspect = 0.95` (recorded, not gated) |
+
+The metrics are `egcm.ranking` (s3 uses the same module, ADR-0006); `stages/s4_compress/run.py` checks every gate in
+`gates.toml` per variant. Of the proposed targets only text→image recall@10 against exact-aspect is recorded: NDCG@10
+was a one-off analysis and has no agreed target.
+
+Recipes (`egcm/compress.py`): `int8_table4` is the only stage candidate. `vis4kv8_text8` and `int8` are measure-only
+(`MEASURE_ONLY`, still buildable with `scripts.measure_s4_eval`): `vis4kv8_text8` fails min cosine (0.917) and runs its
+int4 vision convs on the CPU (233 ms per image), and `int8` is about 410 MB, over the limit. Neither can win, and each
+would cost the stage about two hours of evaluation and placement before `int8_table4`.
 

@@ -19,14 +19,19 @@ conversions, a Neural Engine compile per function on first load, 600 predictions
 3. **Neural Engine fraction** (`egcm/placement.py`): `MLComputePlan` of the compiled package with `CPU_AND_NE`; per
    function, the share of ops (those with a device; consts have none) whose preferred device is the Neural Engine.
    `min_ane_fraction` is the minimum over functions; every off-ANE op is listed per function.
-4. Predicts every fixture with `CPU_AND_NE`; cosines against s0's vectors.
+4. Predicts every fixture with `CPU_AND_NE`; cosines against s0's vectors, and the task-level metrics of
+   `egcm.ranking` (shared with s4): the 120 app queries ranking the 200 images against the bucketed FP reference
+   (s0's query vectors and `emb_bucket`), budgets 70 and 280.
 5. Latency (median and p90 of 20 calls after 3 warm-ups) of `embed_text_16` and `embed_image_70_square`.
 6. Deletes the FP16 package (s4 converts again and compresses each part before merging, because coremltools 9 does
    not compress multifunction models). `EGCM_KEEP_PACKAGES=1` keeps it.
 
 ## Gate
 
-`gates.toml [s3_coreml_ane]`: `min_cosine_text >= 0.995`, `min_cosine_image >= 0.995`, `min_ane_fraction >= 0.95`.
+`gates.toml [s3_coreml_ane]` (ADR-0006, accepted 2026-10-25): `min_cosine_text >= 0.995`; `min_cosine_image >= 0.99`
+(the minimum, a floor) and `min_p1_cosine_image >= 0.995` (1st percentile, linear interpolation, over the 400 image
+vectors); `min_recall_at_10 >= 0.95` and `min_p5_spearman_top50 >= 0.9` (text→image against the bucketed FP
+reference, worst budget; the Spearman value is the 5th percentile over queries); `min_ane_fraction >= 0.95`.
 
 ## FP16 design (already in the model)
 
@@ -52,9 +57,10 @@ Found 2026-10-23/24 and fixed in the model (each exact in maths):
 - **Disk fills while evaluating.** Each function load leaves a Core ML E5 bundle (about one copy of its weights) in
   `~/Library/Caches/python3/com.apple.e5rt.e5bundlecache`; `egcm/e5cache.py` deletes this process's new bundles
   between loads.
-- **Two images below 0.995 on the Neural Engine (open, 2026-10-24).** i141 (embed_image_70_wide, 0.99404) and i161
-  (embed_image_280_landscape, 0.99405); the same package on the GPU gives i141 0.99970. Measurements and options in
-  `docs/decisions/ADR-0006-s3-image-fp16-on-ane.md` (proposed).
+- **Two images below 0.995 on the Neural Engine (resolved 2026-10-25, ADR-0006).** i141 (embed_image_70_wide,
+  0.99404) and i161 (embed_image_280_landscape, 0.99405); the same package on the GPU gives i141 0.99970. Accepted at
+  task level (alone they leave recall@10 against the bucketed FP reference at 0.9975 / 0.9992); images stay on the
+  Neural Engine, and the gate is the floor, the 1st percentile and the ranking above.
 - **The Mac sleeps mid-run** (monotonic timestamps fall behind the wall clock). Run long stages as
   `caffeinate -i -s just stage N`.
 
