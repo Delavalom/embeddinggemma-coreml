@@ -56,7 +56,8 @@ Found 2026-10-23/24 and fixed in the model (each exact in maths):
   package (`egcm/placement.py`).
 - **Disk fills while evaluating.** Each function load leaves a Core ML E5 bundle (about one copy of its weights) in
   `~/Library/Caches/python3/com.apple.e5rt.e5bundlecache`; `egcm/e5cache.py` deletes this process's new bundles
-  between loads.
+  between loads, and `egcm.stage.run_stage` deletes every bundle the run created when it exits, also after an error or
+  SIGTERM (`egcm/e5exit.py`; 2026-10-25, after s2 left 14 GB). Only `kill -9` leaves them behind.
 - **Two images below 0.995 on the Neural Engine (resolved 2026-10-25, ADR-0006).** i141 (embed_image_70_wide,
   0.99404) and i161 (embed_image_280_landscape, 0.99405); the same package on the GPU gives i141 0.99970. Accepted at
   task level (alone they leave recall@10 against the bucketed FP reference at 0.9975 / 0.9992); images stay on the

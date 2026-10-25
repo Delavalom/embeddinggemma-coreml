@@ -46,6 +46,11 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
 
 ## Known failure modes
 
+- **Disk fills with Core ML E5 bundles.** Every function load writes a bundle of about one copy of its weights to
+  `~/Library/Caches/python3/com.apple.e5rt.e5bundlecache`. While evaluating, `egcm.e5prune.BundlePruner` deletes the
+  older ones; when the stage (or `scripts.measure_s4_eval`) exits, also after an error or SIGTERM, `egcm.e5exit`
+  deletes every bundle the run created. Only `kill -9` leaves them behind.
+
 - **Bucketing alone fails ranking against exact-aspect (resolved 2026-10-25, ADR-0007).** s0's own vectors,
   bucketed vs exact-aspect, give recall@10 0.855 (budget 70) / 0.877 (280) and p5 Spearman 0.22 / 0.67, so no recipe
   could pass the original gates. The ranking gates are now against the bucketed FP reference, and bucketing is gated

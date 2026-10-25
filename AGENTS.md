@@ -107,7 +107,8 @@ egcm/                     shared Python library
   report.py               Report schema and atomic read/write
   gates.py                loads gates.toml; evaluate(report, stage_key)
   provenance.py           code_hash, inputs_sha256, is_stale, STAGE_INPUTS
-  stage.py                run_stage: the runner every stage uses
+  stage.py                run_stage: the runner every stage uses (deletes its Core ML E5 bundles on exit)
+  e5exit.py               deletes the E5 cache bundles a process created when it exits (stdlib only)
   metrics.py              cosine, recall@k, spearman
   buckets.py              bucket table, selection, resize-size math
   config.py               typed model config from HF config.json; checks the assumptions the rewrite relies on

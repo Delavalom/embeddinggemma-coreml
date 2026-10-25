@@ -14,6 +14,7 @@ import traceback
 from collections.abc import Callable
 from pathlib import Path
 
+from egcm.e5exit import ExitPurge
 from egcm.gates import evaluate
 from egcm.paths import ROOT, stage_dir
 from egcm.provenance import code_hash, git_dirty, git_sha, inputs_sha256, upstream_problem
@@ -48,8 +49,14 @@ def run_stage(stage_key: str, fn: Callable[[Report], None], *, root: Path = ROOT
     4. Evaluates against the gates of `stage_key` and writes the report atomically.
     5. Re-raises KeyboardInterrupt; otherwise raises SystemExit(1) if the stage did not pass.
 
-    It refuses to run (status `error`) if an upstream report is missing, not passed, or stale.
+    It refuses to run (status `error`) if an upstream report is missing, not passed, or stale. On the way out, also
+    after an error or SIGTERM, it deletes the Core ML E5 cache bundles the run created (egcm.e5exit).
     """
+    with ExitPurge():
+        return _run(stage_key, fn, root)
+
+
+def _run(stage_key: str, fn: Callable[[Report], None], root: Path) -> Report:
     d = stage_dir(stage_key, root)
     r = Report(stage=stage_key, started_at=_now())
     write_report(r, d)

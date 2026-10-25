@@ -20,6 +20,7 @@ import time
 from egcm import parts
 from egcm.compress import MEASURE_ONLY, RECIPES
 from egcm.config import HF_SNAPSHOT, load
+from egcm.e5exit import ExitPurge
 from egcm.e5prune import BundlePruner
 from egcm.functions import FUNCTIONS
 from egcm.gates import gates as stage_gates
@@ -67,4 +68,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with ExitPurge():  # delete the E5 bundles this run created, also on failure
+        main()
