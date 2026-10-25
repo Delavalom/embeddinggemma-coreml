@@ -194,6 +194,7 @@ def test_build_upload_has_the_archive_and_the_plain_layout(tmp_path, monkeypatch
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "RESULTS.md").write_text("| r |\n")
     (tmp_path / "NOTICE").write_text("n\n")
+    (tmp_path / "LICENSE").write_text("apache\n")
     monkeypatch.setattr(s7.published, "tokenizer_source", lambda root=None: tmp_path / "src" / "snapshot")
     out = tmp_path / "upload"
     shas = s7.build_upload(tmp_path, "me/model", "v1.0.0", out)
@@ -202,13 +203,20 @@ def test_build_upload_has_the_archive_and_the_plain_layout(tmp_path, monkeypatch
     listed = [e["path"] for e in json.loads((out / "files.json").read_text())]
     assert "EmbeddingGemma2.aar" not in listed and "README.md" not in listed  # files.json: the plain layout only
     names = {p.name for p in out.iterdir()}
-    assert {"manifest.json", "EmbeddingGemma2.aar", "README.md", "NOTICE", "files.json"} <= names
+    assert {"manifest.json", "EmbeddingGemma2.aar", "README.md", "NOTICE", "LICENSE", "files.json"} <= names
     assert "`EmbeddingGemma2.aar`" in (out / "README.md").read_text()
 
 
-def test_model_card_names_the_recipe_and_download(tmp_path):
-    s4 = published.Shipped(package=tmp_path / "p", archive=tmp_path / "a", archive_sha256="0" * 64,
-                           recipe="int8_table4", download_mb=350.2, max_download_mb=360)
-    card = s7.model_card("me/model", "| r |", s4)
-    assert "s4 recipe `int8_table4`, 350 MB device download" in card and "| r |" in card
-    assert "recipe" not in s7.model_card("me/model", "| r |")
+@needs_aa
+def test_model_card_names_the_archive_and_its_measured_sizes(tmp_path):
+    put_s4(tmp_path)
+    r = published.read_report(tmp_path / "artifacts" / "s4_compress" / "report.json")
+    r.details["variants"] = {"int8_table4": {"download_mb": 349.698, "package_mb": 452.4}}
+    write_report(r, tmp_path / "artifacts" / "s4_compress")
+    v = s7.card.values(tmp_path, {"unpacked_size": 484_000_000})
+    assert (v["archive"], v["manifest"], v["download_mb"], v["max_download_mb"], v["unpacked_mb"]) == (
+        "EmbeddingGemma2.aar", "manifest.json", "349.7", "360", "484.0")
+    card = s7.model_card("me/model", "| r |", v, tmp_path)
+    assert "`EmbeddingGemma2.aar` (349.7 MB" in card and "the s4 gate is 360 MB" in card
+    assert "zipped" not in card and "32 MB" not in card  # no hand-typed sizes left
+    assert s7.card.values(tmp_path)["unpacked_mb"] == s7.card.PENDING

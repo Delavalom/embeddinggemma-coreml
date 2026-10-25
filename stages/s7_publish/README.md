@@ -24,13 +24,27 @@ Only then is `metrics.confirmed = true` set (the one gate, `[s7_publish].confirm
 
 ## What it does
 
-1. Builds `artifacts/s7_publish/upload/`: the published layout of `egcm.published` (the
-   package s4 shipped, uncompressed, as `EmbeddingGemma2.mlpackage/`; `tokenizer/`, `files.json` over those two), plus `README.md` (model
-   card: base model, Apache-2.0, the s4 recipe and download size, `docs/RESULTS.md`, Swift usage) and `NOTICE`.
+1. Builds `artifacts/s7_publish/upload/`:
+   - the app download: s4's device archive as is, `EmbeddingGemma2.aar` (LZFSE Apple Archive of
+     `EmbeddingGemma2.mlpackage/**` and `tokenizer/{tokenizer.json,tokenizer_config.json}`, sha256-checked against
+     s4's `checksums.json`), and `manifest.json` (`egcm.manifest`: format, archive, size, sha256, unpacked_size,
+     revision = the tag, functions);
+   - the plain layout of `egcm.published` for Python and other tools (the package s4 shipped, uncompressed, as
+     `EmbeddingGemma2.mlpackage/`; `tokenizer/`; `files.json` over those two);
+   - `README.md`, `LICENSE` and `NOTICE` (Apache-2.0 section 4: recipients get the license text and the notices).
+   `README.md` is the model card: `model_card.md` (a `string.Template`) filled by `card.py` from the reports
+   (s0's revision and license, s1-s5 cosines, s4's chosen variant: size, ranking, latency, Neural Engine share,
+   worst images, the device archive's name and size; s6's devices; every stage's `git_sha` and `code_hash`), with
+   `docs/RESULTS.md` embedded. Edit the prose in `model_card.md`; never type a measured number into it. A
+   placeholder without a value raises.
 2. `create_repo(public, exist_ok=True)` and `upload_folder`; the upload's commit SHA is the `revision`.
-3. Writes `swift/Sources/EmbeddingGemma/DefaultModel.swift` (repo, revision, sha256 of `files.json`) and commits it.
+3. Logs the upload's commit and sha256(manifest.json), writes `swift/Sources/EmbeddingGemma/DefaultModel.swift`
+   (repo, revision, `defaultManifestSHA256`) and commits it.
 4. `git tag -a v1.0.0`, `gh repo edit --visibility public --accept-visibility-change-consequences`, pushes the
-   branch and the tag, `gh release create v1.0.0 --notes-file docs/RESULTS.md`.
+   branch and the tag, `gh release create v1.0.0` with notes = `docs/release-notes/<tag>.md` (hand-written, if
+   present) followed by `docs/RESULTS.md`, written to `artifacts/s7_publish/release_notes.md`.
+
+Before running it, go through `docs/publish-checklist.md`.
 
 `--tag` overrides `v1.0.0`.
 
