@@ -17,7 +17,8 @@ public actor EmbeddingGemma {
   public enum Source: Sendable {
     /// The published model at `revision` (a 40-character commit SHA) of `repo` (`owner/name`) on the Hugging Face Hub.
     case huggingFace(repo: String = EmbeddingGemma.defaultRepo, revision: String)
-    /// A local folder with the published layout: `files.json`, `EmbeddingGemma2.mlpackage/`, `tokenizer/`.
+    /// A local folder with the plain layout (`files.json`, `EmbeddingGemma2.mlpackage/`, `tokenizer/`), or with
+    /// `manifest.json` and the archive it names.
     case file(URL)
   }
 
@@ -80,16 +81,24 @@ public actor EmbeddingGemma {
     let installed: InstalledModel
     switch source {
     case .huggingFace(let repo, let revision):
-      let pinned = repo == defaultRepo && revision == defaultRevision ? defaultFilesManifestSHA256 : nil
-      installed = try await store.ensureModel(repo: repo, revision: revision, filesSHA256: pinned, progress: progress)
-    case .file(let folder):
-      let bytes: Data
-      do { bytes = try Data(contentsOf: folder.appending(path: FilesManifest.fileName)) } catch {
-        throw EmbeddingGemmaError.downloadFailed(underlying: error)
-      }
-      let revision = "file-" + Checksums.sha256(data: bytes).prefix(16)  // hash and parse the same bytes
-      installed = try await store.ensureModel(baseURL: folder, repo: "local", revision: revision, manifest: bytes,
+      let pinned = repo == defaultRepo && revision == defaultRevision ? defaultManifestSHA256 : nil
+      installed = try await store.ensureModel(repo: repo, revision: revision, manifestSHA256: pinned,
                                               progress: progress)
+    case .file(let folder):
+      let files = folder.appending(path: FilesManifest.fileName), archived = folder.appending(path: ArchiveManifest.fileName)
+      if !FileManager.default.fileExists(atPath: files.path), FileManager.default.fileExists(atPath: archived.path) {
+        let bytes: Data
+        do { bytes = try Data(contentsOf: archived) } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
+        let revision = "file-" + Checksums.sha256(data: bytes).prefix(16)
+        installed = try await store.ensureModel(archiveAt: folder, repo: "local", revision: revision,
+                                                manifestSHA256: Checksums.sha256(data: bytes), progress: progress)
+      } else {
+        let bytes: Data
+        do { bytes = try Data(contentsOf: files) } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
+        let revision = "file-" + Checksums.sha256(data: bytes).prefix(16)  // hash and parse the same bytes
+        installed = try await store.ensureModel(baseURL: folder, repo: "local", revision: revision, manifest: bytes,
+                                                progress: progress)
+      }
     }
     let encoder: TextEncoder
     do { encoder = try await TextEncoder(tokenizerFolder: installed.tokenizer) } catch let e as EmbeddingGemmaError {

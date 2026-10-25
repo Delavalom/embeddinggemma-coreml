@@ -22,10 +22,12 @@ public struct InstalledModel: Sendable, Equatable {
 
 /// Downloads, verifies and compiles the published model into `<root>/<repo>/<revision>/`.
 ///
-/// The published folder (a Hugging Face repo at a pinned commit, or a local folder) has this layout: `files.json`,
-/// `EmbeddingGemma2.mlpackage/**` (uncompressed) and `tokenizer/{tokenizer.json,tokenizer_config.json}`. Each file is
-/// downloaded on its own (resumable) and checked against its size and SHA-256 in `files.json`; then the package is
-/// compiled with `MLModel.compileModel(at:)`.
+/// From the Hugging Face Hub (a pinned commit) it downloads `manifest.json` (`ArchiveManifest`) and the one archive
+/// it names: an LZFSE Apple Archive of `EmbeddingGemma2.mlpackage/**` and `tokenizer/{tokenizer.json,
+/// tokenizer_config.json}`, resumable, checked against its size and SHA-256, then validated (no symlinks, no absolute
+/// or ".." paths) and extracted with the AppleArchive framework. A local folder may instead hold the plain layout,
+/// `files.json` plus those files, each checked on its own. Then the package is compiled with
+/// `MLModel.compileModel(at:)`.
 ///
 /// - Every attempt works in its own `<revision>.partial-<uuid>/` and renames it to `<revision>/` only after the
 ///   compile succeeds. Files that already verified in an earlier failed attempt of the same revision are reused.
@@ -86,27 +88,43 @@ public struct ModelStore: Sendable {
     }
   }
 
-  /// The model of `repo` at `revision` from the Hugging Face Hub. `filesSHA256`, when given, pins `files.json`.
-  public func ensureModel(repo: String, revision: String, filesSHA256: String? = nil,
+  /// The model of `repo` at `revision` from the Hugging Face Hub: `manifest.json` and the one archive it names.
+  /// `manifestSHA256`, when given, pins `manifest.json`.
+  public func ensureModel(repo: String, revision: String, manifestSHA256: String? = nil,
                           progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws -> InstalledModel {
     try Self.validate(repo: repo, revision: revision)
-    return try await ensureModel(baseURL: Self.huggingFaceBase(repo: repo, revision: revision), repo: repo,
-                                 revision: revision, filesSHA256: filesSHA256, progress: progress)
+    return try await ensureModel(archiveAt: Self.huggingFaceBase(repo: repo, revision: revision), repo: repo,
+                                 revision: revision, manifestSHA256: manifestSHA256, progress: progress)
   }
 
-  /// The model published at `baseURL` (https:// or file://), installed as `repo`/`revision`. `manifest` supplies
-  /// the bytes of `files.json` instead of fetching them (a local folder hashes and parses the same bytes).
+  /// The archive published at `baseURL` (https:// or file://: `manifest.json` + the archive), as `repo`/`revision`.
+  package func ensureModel(archiveAt baseURL: URL, repo: String = "local", revision: String,
+                           manifestSHA256: String? = nil,
+                           progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws -> InstalledModel {
+    try await install(baseURL: baseURL, repo: repo, revision: revision, layout: .archive,
+                      expectedSHA256: manifestSHA256, progress: progress)
+  }
+
+  /// The plain files published at `baseURL` (https:// or file://), installed as `repo`/`revision`. `manifest`
+  /// supplies the bytes of `files.json` instead of fetching them (a local folder hashes and parses the same bytes).
   package func ensureModel(baseURL: URL, repo: String = "local", revision: String, manifest: Data? = nil,
                            filesSHA256: String? = nil,
                            progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws -> InstalledModel {
+    try await install(baseURL: baseURL, repo: repo, revision: revision, layout: .files(manifest: manifest),
+                      expectedSHA256: filesSHA256, progress: progress)
+  }
+
+  private func install(baseURL: URL, repo: String, revision: String, layout: Installer.Layout,
+                       expectedSHA256: String?,
+                       progress: (@Sendable (InstallProgress) -> Void)?) async throws -> InstalledModel {
     guard FilesManifest.isSafe(repo), FilesManifest.isSafe(revision), !revision.contains("/"),
           !revision.hasPrefix("."), !revision.contains(".partial") else {
       throw EmbeddingGemmaError.invalidSource("unsafe repo or revision: \(repo) \(revision)")
     }
     let folder = revisionFolder(repo: repo, revision: revision)
     let key = StoreRegistry.key(folder)
-    let job = Installer(store: self, base: baseURL, repo: repo, revision: revision, manifest: manifest,
-                        expectedManifestSHA256: filesSHA256, progress: progress)
+    let job = Installer(store: self, base: baseURL, repo: repo, revision: revision, layout: layout,
+                        expectedManifestSHA256: expectedSHA256, progress: progress)
     let (task, created) = StoreRegistry.inFlight.withLock { tasks -> (Task<InstalledModel, any Error>, Bool) in
       if let t = tasks[key] { return (t, false) }
       let t = Task { try await job.run() }
