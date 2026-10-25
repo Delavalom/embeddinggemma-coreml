@@ -11,3 +11,4 @@ Examples/PhotoSearchDemo/*.xcodeproj
 .ruff_cache/
 Examples/PhotoSearchDemo/Team.xcconfig
 Examples/PhotoSearchDemo/Model/
+/Package.resolved

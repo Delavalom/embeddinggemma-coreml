@@ -50,3 +50,7 @@ jobs:
       - name: Swift build and test
         working-directory: swift
         run: swift build && swift test
+
+      # What SwiftPM consumers resolve: the root Package.swift (sources in swift/).
+      - name: Root package (SwiftPM consumers)
+        run: swift package describe >/dev/null && swift build
