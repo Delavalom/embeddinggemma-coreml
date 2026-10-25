@@ -105,6 +105,21 @@ public struct ModelStore: Sendable {
                       expectedSHA256: manifestSHA256, progress: progress)
   }
 
+  /// Installs `folder`, an already unpacked and verified layout (`EmbeddingGemma2.mlpackage/**` and
+  /// `tokenizer/{tokenizer.json,tokenizer_config.json}`, for example the app archive extracted by the caller), as
+  /// `repo`/`revision` without downloading or copying anything.
+  ///
+  /// - The folder is **moved** into the store (a rename: it must be on the same volume as `root`, else
+  ///   `.storageFailed`), and its package is compiled there. Free space needed: the compiled model only, about the
+  ///   package's size (checked first, `.insufficientStorage`); the package is deleted once compiled, so afterwards
+  ///   the install takes about what the folder took.
+  /// - If `repo`/`revision` is already installed, that install is returned and `folder` is left untouched.
+  /// - Symlinks and a missing package or tokenizer file are refused before anything moves.
+  public func adopt(folder: URL, repo: String, revision: String) async throws -> InstalledModel {
+    try await install(baseURL: folder, repo: repo, revision: revision, layout: .adopt(folder), expectedSHA256: nil,
+                      progress: nil)
+  }
+
   /// The plain files published at `baseURL` (https:// or file://), installed as `repo`/`revision`. `manifest`
   /// supplies the bytes of `files.json` instead of fetching them (a local folder hashes and parses the same bytes).
   package func ensureModel(baseURL: URL, repo: String = "local", revision: String, manifest: Data? = nil,

@@ -18,8 +18,12 @@ public actor EmbeddingGemma {
     /// The published model at `revision` (a 40-character commit SHA) of `repo` (`owner/name`) on the Hugging Face Hub.
     case huggingFace(repo: String = EmbeddingGemma.defaultRepo, revision: String)
     /// A local folder with the plain layout (`files.json`, `EmbeddingGemma2.mlpackage/`, `tokenizer/`), or with
-    /// `manifest.json` and the archive it names.
+    /// `manifest.json` and the archive it names. Copied into the store (needs about 3x the files in free space).
     case file(URL)
+    /// An unpacked, already verified layout (`EmbeddingGemma2.mlpackage/`, `tokenizer/`), e.g. the app archive the
+    /// caller downloaded, checked and extracted. Moved into the store as `repo`/`revision`, not copied: it must be
+    /// on the store's volume and needs free space for the compiled model only (`ModelStore.adopt`).
+    case installed(URL, repo: String = EmbeddingGemma.defaultRepo, revision: String)
   }
 
   public enum ImageBudget: Sendable {
@@ -84,6 +88,8 @@ public actor EmbeddingGemma {
       let pinned = repo == defaultRepo && revision == defaultRevision ? defaultManifestSHA256 : nil
       installed = try await store.ensureModel(repo: repo, revision: revision, manifestSHA256: pinned,
                                               progress: progress)
+    case .installed(let folder, let repo, let revision):
+      installed = try await store.adopt(folder: folder, repo: repo, revision: revision)
     case .file(let folder):
       let files = folder.appending(path: FilesManifest.fileName), archived = folder.appending(path: ArchiveManifest.fileName)
       if !FileManager.default.fileExists(atPath: files.path), FileManager.default.fileExists(atPath: archived.path) {

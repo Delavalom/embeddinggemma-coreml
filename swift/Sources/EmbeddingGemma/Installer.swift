@@ -9,6 +9,8 @@ struct Installer: Sendable {
     case files(manifest: Data?)
     /// `manifest.json` and the one archive it names (the app download).
     case archive
+    /// A local folder that already holds the unpacked layout: moved in place, only the package is compiled.
+    case adopt(URL)
   }
 
   let store: ModelStore
@@ -66,11 +68,15 @@ struct Installer: Sendable {
       source = files
     case .archive:
       source = try await downloadArchive(files: files, partial: partial, repoDir: repoDir, marker: &marker)
+    case .adopt(let folder):
+      try adopt(folder, into: files)
+      source = files
     }
 
     let compiled = partial.appending(path: ModelStore.compiledName)
     let tmp: URL
     do { tmp = try await store.compiler(source.appending(path: ModelStore.packageName)) } catch {
+      if case .adopt(let folder) = layout { try? fm.moveItem(at: files, to: folder) }  // give the caller's folder back
       if error is CancellationError { throw error }
       throw EmbeddingGemmaError.isOutOfSpace(error) ? EmbeddingGemmaError.storageFailed(underlying: error)
         : EmbeddingGemmaError.modelLoadFailed(underlying: error)
