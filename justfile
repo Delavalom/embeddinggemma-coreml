@@ -54,5 +54,6 @@ lint:
 bench-device:
     just stage 6
 
+# s7 runs in the reference group: it is the locked environment that has huggingface_hub.
 publish *flags:
-    uv run --exact --group convert python -m stages.s7_publish.run {{flags}}
+    uv run --exact --group reference python -m stages.s7_publish.run {{flags}}
