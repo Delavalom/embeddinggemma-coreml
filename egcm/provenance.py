@@ -57,7 +57,7 @@ STAGE_CODE: dict[str, tuple[str, ...]] = {
                       "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s4_compress": ("stages/s4_compress", "egcm/compress.py", *_BUILD, "egcm/placement.py", "egcm/e5cache.py",
                     "egcm/e5prune.py", "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
-    "s5_swift": ("stages/s5_swift", "swift", *_COMPARE, *_LOCK),
+    "s5_swift": ("stages/s5_swift", "swift", "egcm/published.py", *_COMPARE, *_LOCK),
     "s6_device": ("stages/s6_device", "swift", "Examples", "egcm/metrics.py", "egcm/paths.py", "egcm/published.py",
                   *_LOCK),
     "s7_publish": ("stages/s7_publish", "swift", "egcm/paths.py", "egcm/published.py", *_LOCK),

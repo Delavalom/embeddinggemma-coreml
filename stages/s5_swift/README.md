@@ -2,14 +2,16 @@
 
 The Swift package on macOS against s0: token ids, preprocessed pixels, and end-to-end vectors.
 
-Run: `just stage 5` (the `convert` group). Needs fresh passing s0 and s4 (`artifacts/s4_compress/EmbeddingGemma2.mlpackage`).
+Run: `just stage 5` (the `convert` group). Needs fresh passing s0 and s4. The package is the one s4's report says it shipped
+(`egcm.published.shipped`: `details.package`, recipe `details.winner`, recorded here as `details.s4_recipe`).
 
 ## What it does
 
 1. `run.py` writes the synthetic pattern (`export_fixtures.synthetic`) at `SYNTHETIC_SIZES` as PNGs into
    `artifacts/s5_swift/synthetic/`, with torch's uint8 antialiased bicubic of each as the reference.
 2. It runs `swift run -c release egcm-parity` (`swift/Sources/egcm-parity/`). The CLI goes through the path an app
-   takes: it puts the package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`) in a
+   takes: it puts the package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`,
+   sha256-checked by `egcm.published.tokenizer_source`) in a
    local published folder with `files.json`, installs it with `ModelStore` (verify, compile) and loads
    `EmbeddingGemma.load(.file(...), dimensions: 768)` once per budget, on `.cpuAndNeuralEngine`. For every fixture
    text (prompt by kind: `query` or `document`) it records the token ids and the vector; for every fixture image and

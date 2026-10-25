@@ -16,16 +16,17 @@ from the logged-in `hf` CLI or `HF_TOKEN`; `gh` must be logged in with rights to
    overwrites the report of a real publish.
 2. `HF_REPO_TARGET` unset or not `owner/name`: exits 2, no report.
 3. `run_stage` refuses (status `error`) unless s0–s6 are all `passed` and not stale; `fill` checks it again.
-4. Preflight: clean git tree, the tag does not exist, `docs/RESULTS.md` exists (Task 21's `gen_results`), and s4's
-   package is present.
+4. Preflight: clean git tree, the tag does not exist, `docs/RESULTS.md` exists (Task 21's `gen_results`), and the
+   package s4's report says it shipped (`egcm.published.shipped`: `details.package`, recipe `details.winner`) is
+   present.
 
 Only then is `metrics.confirmed = true` set (the one gate, `[s7_publish].confirmed`).
 
 ## What it does
 
-1. Builds `artifacts/s7_publish/upload/`: the published layout of `egcm.published` (s4's
-   `EmbeddingGemma2.mlpackage/` uncompressed, `tokenizer/`, `files.json` over those two), plus `README.md` (model
-   card: base model, Apache-2.0, `docs/RESULTS.md`, Swift usage) and `NOTICE`.
+1. Builds `artifacts/s7_publish/upload/`: the published layout of `egcm.published` (the
+   package s4 shipped, uncompressed, as `EmbeddingGemma2.mlpackage/`; `tokenizer/`, `files.json` over those two), plus `README.md` (model
+   card: base model, Apache-2.0, the s4 recipe and download size, `docs/RESULTS.md`, Swift usage) and `NOTICE`.
 2. `create_repo(public, exist_ok=True)` and `upload_folder`; the upload's commit SHA is the `revision`.
 3. Writes `swift/Sources/EmbeddingGemma/DefaultModel.swift` (repo, revision, sha256 of `files.json`) and commits it.
 4. `git tag -a v1.0.0`, `gh repo edit --visibility public --accept-visibility-change-consequences`, pushes the

@@ -24,22 +24,23 @@ def test_gate_rows_say_which_gate_failed(repo):
 
 
 def test_every_s4_variant_and_s5_pixels_are_listed(repo):
-    v = {"download_mb": 150.2, "package_mb": 160.0, "min_cosine": 0.991, "min_recall_at_10": 0.96,
-         "min_p5_spearman_top50": 0.93, "ane_fraction_min": 0.99, "vs_bucket": {"min_recall_at_10": 0.98},
-         "description": "int4"}
-    put(repo, "s4_compress", status="passed", passed=True, details={
-        "chosen": "int4b32", "winner": "int4b32",
-        "variants": {"int4b32": {**v, "passes": {"min_cosine": True}},
-                     "int8": {**v, "download_mb": 290.0, "passes": {"min_cosine": False, "max_download_mb": True}}}})
+    v = {"download_mb": 350.2, "package_mb": 360.0, "min_cosine": 0.991, "min_recall_at_10": 0.96,
+         "min_p5_spearman_top50": 0.93, "min_t2i_top1_in_top10": 0.97, "max_i2i_label_p10_drop": 0.01,
+         "ane_fraction_min": 0.99, "vs_raw": {"min_recall_at_10": 0.85}, "description": "int8, table int4"}
+    put(repo, "s4_compress", status="passed", passed=True, gate_values={"max_download_mb": 360}, details={
+        "chosen": "int8_table4", "winner": "int8_table4",
+        "variants": {"int8_table4": {**v, "passes": {"min_cosine": True}},
+                     "int8": {**v, "download_mb": 410.0, "passes": {"min_cosine": True, "max_download_mb": False}}}})
     put(repo, "s5_swift", status="passed", passed=True, details={
         "pixels": {"png_pixel_p99": 0.0, "png_pixel_max": 0.0, "jpeg_pixel_p99": 0.0078, "jpeg_pixel_max": 0.12,
                    "synthetic_pixel_p99": 0.0, "synthetic_pixel_max": 0.0,
                    "bit_exact": {"png": "60/60", "jpeg": "0/340", "synthetic": "20/20"}},
         "cosine": {"text": {"query": {"n": 120, "min": 0.995, "mean": 0.999}}, "image": {}}})
     text = render(repo)
-    assert "Chosen: `int4b32` (winner: `int4b32`)" in text
-    assert "| int4b32 | 150.2 | 160 | 0.991 | 0.96 | 0.93 | 0.99 | 0.98 | all | int4 |" in text
-    assert "| int8 | 290 |" in text and "fails min_cosine" in text
+    assert "Chosen: `int8_table4` (winner: `int8_table4`)" in text and "Download limit: 360 MB." in text
+    row = "| int8_table4 | 350.2 | 360 | 0.991 | 0.96 | 0.93 | 0.97 | 0.01 | 0.99 | 0.85 | all | int8, table int4 |"
+    assert row in text
+    assert "| int8 | 410 |" in text and "fails max_download_mb" in text
     assert "| png | 0 | 0 | 60/60 |" in text and "| jpeg | 0.0078 | 0.12 | 0/340 |" in text
     assert "| text query | 120 | 0.995 | 0.999 |" in text
 
@@ -51,3 +52,9 @@ def test_device_results_from_docs_results(repo):
                         gate_values={"max_peak_rss_mb": 800}, details={"device": "iPhone16,1"}), d)
     (d / "report.json").rename(d / "s6_iPhone16,1.json")
     assert "| docs/results/s6_iPhone16,1.json | iPhone16,1 | passed | max_peak_rss_mb=500 |" in render(repo)
+
+
+def test_s6_device_comes_from_its_devices(repo):
+    put(repo, "s6_device", status="passed", passed=True, metrics={"max_peak_rss_mb": 500.0},
+        gate_values={"max_peak_rss_mb": 800}, details={"devices": {"iPhone16,1": {}, "iPhone14,3": {}}})
+    assert "| artifacts/s6_device/report.json | iPhone16,1, iPhone14,3 | passed |" in render(repo)

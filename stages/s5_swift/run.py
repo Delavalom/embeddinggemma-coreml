@@ -22,27 +22,17 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from egcm import published
 from egcm.buckets import BUDGETS, choose_bucket
-from egcm.config import HF_SNAPSHOT
 from egcm.fixtures import S0_DIR, load_images, load_texts
-from egcm.paths import ARTIFACTS, FIXTURES, HF_REVISION, ROOT, stage_dir
+from egcm.paths import ARTIFACTS, FIXTURES, ROOT, stage_dir
 from egcm.report import Report
 from egcm.stage import run_stage
 from stages.s5_swift.compare import summarize
 from stages.s5_swift.export_fixtures import SYNTHETIC_SIZES, synthetic, torch_resize
 
 STAGE = "s5_swift"
-S4_PACKAGE = ARTIFACTS / "s4_compress" / "EmbeddingGemma2.mlpackage"
 SWIFT = ROOT / "swift"
-
-
-def tokenizer_dir() -> Path:
-    """s0's pinned HF snapshot, else the Swift tests' verified download (same revision)."""
-    for d in (HF_SNAPSHOT, ARTIFACTS / "tokenizer" / HF_REVISION):
-        if (d / "tokenizer.json").is_file() and (d / "tokenizer_config.json").is_file():
-            return d
-    raise FileNotFoundError(f"no tokenizer.json in {HF_SNAPSHOT} or artifacts/tokenizer/{HF_REVISION}: "
-                            "run `just stage 0` (or `cd swift && swift test` to download it)")
 
 
 def write_synthetic(folder: Path) -> dict[str, dict]:
@@ -61,9 +51,9 @@ def write_synthetic(folder: Path) -> dict[str, dict]:
 
 def run_parity(model: Path, out: Path, synthetic_dir: Path, compute_units: str, limit: int) -> dict:
     """Build and run egcm-parity (release), return its JSON."""
-    cmd = ["swift", "run", "-c", "release", "egcm-parity", "--model", str(model), "--tokenizer", str(tokenizer_dir()),
-           "--fixtures", str(FIXTURES), "--out", str(out), "--synthetic", str(synthetic_dir),
-           "--compute-units", compute_units, "--limit", str(limit)]
+    cmd = ["swift", "run", "-c", "release", "egcm-parity", "--model", str(model),
+           "--tokenizer", str(published.tokenizer_source()), "--fixtures", str(FIXTURES), "--out", str(out),
+           "--synthetic", str(synthetic_dir), "--compute-units", compute_units, "--limit", str(limit)]
     print("$ " + " ".join(cmd), file=sys.stderr, flush=True)
     subprocess.run(cmd, cwd=SWIFT, check=True)
     return json.loads(out.read_text())
@@ -118,9 +108,10 @@ def measure(model: Path, out_dir: Path, s0: Path = S0_DIR, compute_units: str = 
 
 
 def fill(report: Report) -> None:
-    metrics, details = measure(S4_PACKAGE, stage_dir(STAGE))
+    s4 = published.shipped()  # the package and recipe s4's report says it shipped
+    metrics, details = measure(s4.package, stage_dir(STAGE))
     report.metrics |= metrics
-    report.details |= details
+    report.details |= details | {"s4_recipe": s4.recipe}
     print(json.dumps(metrics), flush=True)
 
 

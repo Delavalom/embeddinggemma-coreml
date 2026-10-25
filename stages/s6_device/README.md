@@ -22,15 +22,17 @@ Needs fresh passing s4 and s5. To choose a device:
 The model is not on Hugging Face yet (that is s7), so this stage bundles it:
 
 1. `egcm.published.assemble` writes the published layout to `Examples/PhotoSearchDemo/Model/` (gitignored):
-   `EmbeddingGemma2.mlpackage/` (an APFS clone of s4's package), `tokenizer/` (from s0's snapshot or the Swift
-   tests' cache, sha256-checked) and `files.json`.
+   `EmbeddingGemma2.mlpackage/` (an APFS clone of the package s4's report says it shipped, `egcm.published.shipped`,
+   recorded as `details.s4_recipe`; `--package <path>` bundles another one and records null), `tokenizer/` (from
+   s0's snapshot or the Swift tests' cache, sha256-checked) and `files.json`.
 2. A build script in `project.yml` copies `Model/` into the app bundle when it exists.
 3. The app loads it with `EmbeddingGemma.load(.file(bundleURL))`, which verifies every file against `files.json`,
    copies it to Application Support and compiles it once. The app reports `model_revision` =
    `file-<first 16 hex of sha256(files.json)>`, and the stage fails if that is not the model it just bundled.
 
 Without `Model/` the app falls back to the published default (`EmbeddingGemma.defaultRevision`), which fails until
-s7 has run. The bundled app is about the size of the package (~300 MB).
+s7 has run. The bundled app is about the size of the uncompressed package (the s4 report's
+`details.variants.<recipe>.package_mb`; `int8_table4` zips to about 350 MB).
 
 ## What it does
 

@@ -101,8 +101,13 @@ def preflight(root: Path, tag: str, pub: Publisher) -> list[str]:
         out.append(f"tag {tag} already exists")
     if not (root / RESULTS_MD).is_file():
         out.append(f"{RESULTS_MD} is missing; run `python -m scripts.gen_results`")
-    if not (root / "artifacts" / "s4_compress" / published.PACKAGE_NAME / "Manifest.json").is_file():
-        out.append(f"artifacts/s4_compress/{published.PACKAGE_NAME} is missing; rerun `just stage 4`")
+    try:  # the package s4's report says it shipped, not a recipe name hard-coded here
+        s4 = published.shipped(root)
+    except Exception as e:  # no report, unreadable, or no winner
+        out.append(f"s4_compress: {e}")
+    else:
+        if not (s4.package / "Manifest.json").is_file():
+            out.append(f"{s4.package} (s4 recipe {s4.recipe}) is missing; rerun `just stage 4`")
     return out
 
 
@@ -119,7 +124,11 @@ public extension EmbeddingGemma {{
 """
 
 
-def model_card(repo: str, results_md: str) -> str:
+def model_card(repo: str, results_md: str, s4: published.Shipped | None = None) -> str:
+    weights = ""
+    if s4 is not None:
+        mb = "" if s4.download_mb is None else f", {s4.download_mb:.0f} MB zipped"
+        weights = f"\nWeights: s4 recipe `{s4.recipe}`{mb}. See the s4 table below.\n"
     return f"""---
 license: apache-2.0
 base_model: google/embeddinggemma-2
@@ -131,7 +140,7 @@ tags: [coreml, embeddings, image-text, ios, neural-engine]
 
 `google/embeddinggemma-2` (text and image embeddings in one 768-d space) converted to a multifunction Core ML
 model for the iPhone Neural Engine, with parity checked against the original at every stage.
-
+{weights}
 Use it from Swift with the `EmbeddingGemma` package (`EmbeddingGemma.load(.huggingFace(repo: "{repo}", revision:
 ...))`). Every file is listed with its size and SHA-256 in `files.json` and verified on download.
 
@@ -144,9 +153,9 @@ License: Apache-2.0, same as the base model. See NOTICE.
 def build_upload(root: Path, repo: str, out: Path) -> str:
     """The upload folder: the published layout plus README.md (model card) and NOTICE. Returns files.json's sha256.
     files.json covers the model and tokenizer only (what ModelStore downloads), so it is written first."""
-    package = root / "artifacts" / "s4_compress" / published.PACKAGE_NAME
-    files_sha = published.assemble(package, published.tokenizer_source(root), out)
-    (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text()))
+    s4 = published.shipped(root)
+    files_sha = published.assemble(s4.package, published.tokenizer_source(root), out)
+    (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text(), s4))
     shutil.copyfile(root / "NOTICE", out / "NOTICE")
     return files_sha
 
@@ -183,6 +192,7 @@ def make_fill(root: Path, repo: str, tag: str, pub: Publisher):
         if problems := preflight(root, tag, pub):
             raise RuntimeError("; ".join(problems))
         report.metrics["confirmed"] = True
+        report.details["s4_recipe"] = published.shipped(root).recipe
         report.details.update(publish(root, repo, tag, pub))
     return fill
 

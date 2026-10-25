@@ -21,7 +21,7 @@ from pathlib import Path
 
 from egcm import published
 from egcm.gates import targets
-from egcm.paths import ARTIFACTS, ROOT, stage_dir
+from egcm.paths import ROOT, stage_dir
 from egcm.report import Report
 from egcm.stage import run_stage
 from stages.s6_device.device import BUNDLE_ID, Device, Devicectl, pick_device, poll_result
@@ -31,7 +31,6 @@ STAGE = "s6_device"
 DEMO = ROOT / "Examples" / "PhotoSearchDemo"
 # The published folder (egcm.published) the app bundles as its `Model` resource. Gitignored; written by this stage.
 MODEL_DIR = DEMO / "Model"
-S4_PACKAGE = ARTIFACTS / "s4_compress" / published.PACKAGE_NAME
 
 
 def log(msg: str) -> None:
@@ -118,7 +117,11 @@ def summarize(results: list[dict], target_ms_70: float) -> tuple[dict, dict]:
 def make_fill(args: argparse.Namespace):
     def fill(report: Report) -> None:
         out = stage_dir(STAGE)
-        package = Path(args.package)
+        if args.package is None:  # what s4's report says it shipped
+            s4 = published.shipped()
+            package, recipe = s4.package, s4.recipe
+        else:
+            package, recipe = Path(args.package), None
         files_sha = published.assemble(package, published.tokenizer_source(), MODEL_DIR)
         expected_revision = "file-" + files_sha[:16]  # EmbeddingGemma.modelRevision for a .file source
         log(f"bundling {package} as {MODEL_DIR} (files.json {files_sha[:16]})")
@@ -131,14 +134,15 @@ def make_fill(args: argparse.Namespace):
         (out / "devices" / f"{device.product_type}.json").write_text(json.dumps(result, indent=1) + "\n")
         metrics, details = summarize([result], targets(STAGE)["target_ms_per_image_70"])
         report.metrics.update(metrics)
-        report.details.update(details, package=str(package), files_json_sha256=files_sha, bundle_id=BUNDLE_ID)
+        report.details.update(details, package=str(package), s4_recipe=recipe, files_json_sha256=files_sha,
+                              bundle_id=BUNDLE_ID)
     return fill
 
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--device", help="UDID or CoreDevice identifier (default: the first physical iPhone)")
-    p.add_argument("--package", default=str(S4_PACKAGE), help="the .mlpackage to bundle (default: s4's)")
+    p.add_argument("--package", help="the .mlpackage to bundle (default: the one s4's report says it shipped)")
     run_stage(STAGE, make_fill(p.parse_args(argv)))
 
 

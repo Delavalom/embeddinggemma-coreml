@@ -14,9 +14,12 @@ from egcm.paths import HF_REPO, HF_REVISION, ROOT, STAGES
 from egcm.report import Report
 from scripts.gen_status import fmt, key_metrics, load, load_results, stale
 
+# The s4 variant metrics (egcm.ranking.metrics, ADR-0007): ranking against the bucketed FP reference, bucketing
+# fidelity against exact-aspect. `vs_raw` recall@10 is recorded only.
 S4_COLUMNS = (("download_mb", "download MB"), ("package_mb", "package MB"), ("min_cosine", "min cosine"),
               ("min_recall_at_10", "recall@10"), ("min_p5_spearman_top50", "p5 Spearman top-50"),
-              ("ane_fraction_min", "min ANE fraction"))
+              ("min_t2i_top1_in_top10", "exact-aspect top-1 in top 10"),
+              ("max_i2i_label_p10_drop", "i2i p@10 drop"), ("ane_fraction_min", "min ANE fraction"))
 
 
 def _cell(v: object) -> str:
@@ -58,17 +61,20 @@ def s4_section(r: Report | str | None) -> list[str]:
     if not isinstance(r, Report) or not r.details.get("variants"):
         return []
     variants = r.details["variants"]
+    limit = r.gate_values.get("max_download_mb")
     lines = ["", "## s4 variants", "", f"Chosen: `{r.details.get('chosen', '-')}` (winner: "
              f"`{r.details.get('winner') or 'none'}`). Variants are tried smallest first; the first that passes "
-             "every gate wins, so later ones may not have run.", "",
-             "| variant | " + " | ".join(h for _, h in S4_COLUMNS) + " | recall@10 vs bucket | passes | description |",
+             "every gate wins, so later ones may not have run."
+             + (f" Download limit: {fmt(limit)} MB." if limit is not None else ""), "",
+             "| variant | " + " | ".join(h for _, h in S4_COLUMNS)
+             + " | recall@10 vs exact-aspect | passes | description |",
              "|---|" + "---|" * (len(S4_COLUMNS) + 3)]
     for name, m in variants.items():
         passes = m.get("passes", {})
         failed = [k for k, ok in passes.items() if not ok]
         verdict = "all" if passes and not failed else ("fails " + ", ".join(failed) if failed else "-")
         lines.append(f"| {name} | " + " | ".join(_cell(m.get(k)) for k, _ in S4_COLUMNS)
-                     + f" | {_cell(m.get('vs_bucket', {}).get('min_recall_at_10'))} | {verdict} "
+                     + f" | {_cell(m.get('vs_raw', {}).get('min_recall_at_10'))} | {verdict} "
                      f"| {m.get('description', '-')} |")
     return lines
 
@@ -101,7 +107,8 @@ def device_section(reports: dict, results: dict) -> list[str]:
         if isinstance(r, str):
             lines.append(f"| {src} | - | invalid | {r} |")
         else:
-            lines.append(f"| {src} | {r.details.get('device', '-')} | {r.status} | {key_metrics(r)} |")
+            device = r.details.get("device") or ", ".join(r.details.get("devices") or {}) or "-"  # s6: per model
+            lines.append(f"| {src} | {device} | {r.status} | {key_metrics(r)} |")
     return lines
 
 

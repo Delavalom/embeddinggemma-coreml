@@ -5,7 +5,8 @@
     tokenizer/tokenizer.json                 from google/embeddinggemma-2 at HF_REVISION
     tokenizer/tokenizer_config.json
 
-s6 builds it into the demo app's bundle; s7 uploads it. `files.json` matches
+s6 builds it into the demo app's bundle; s7 uploads it. Which s4 package that is comes from s4's report
+(`shipped`), never from a recipe name written here. `files.json` matches
 swift/Sources/EmbeddingGemma/Checksums.swift: a JSON array of {path, size, sha256}, sorted by path, covering
 every regular file except `files.json` itself and hidden files (any path component starting with ".").
 """
@@ -16,9 +17,11 @@ import hashlib
 import json
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from egcm.paths import ARTIFACTS, HF_REPO, HF_REVISION
+from egcm.report import read_report
 
 PACKAGE_NAME = "EmbeddingGemma2.mlpackage"
 TOKENIZER_DIR = "tokenizer"
@@ -28,6 +31,36 @@ TOKENIZER_FILES = {
     "tokenizer.json": "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4",
     "tokenizer_config.json": "17bd5d6e9364ca49a534e1502076593317c298d4a663623091ed45388f004874",
 }
+
+
+S4_STAGE = "s4_compress"
+
+
+@dataclass(frozen=True)
+class Shipped:
+    """What s4 ships, as its report records it."""
+
+    package: Path  # artifacts/s4_compress/<details.package>
+    recipe: str  # details.winner: the first egcm.compress.RECIPES entry that passed every s4 gate (ADR-0007)
+    download_mb: float | None  # the zipped package (metric max_download_mb)
+    max_download_mb: float | None  # the gate it was checked against (gates.toml [s4_compress], as recorded)
+
+
+def shipped(root: Path | None = None) -> Shipped:
+    """The package s4 shipped, read from artifacts/s4_compress/report.json.
+
+    s4 renames its winning recipe to `details.package`. A failed s4 still leaves its closest variant there, so a
+    report without `details.winner` is refused rather than trusted."""
+    artifacts = ARTIFACTS if root is None else Path(root) / "artifacts"
+    path = artifacts / S4_STAGE / "report.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} does not exist; run `just stage 4`")
+    r = read_report(path)
+    winner, name = r.details.get("winner"), r.details.get("package")
+    if not winner or not name:
+        raise RuntimeError(f"s4 shipped nothing (status {r.status!r}, winner {winner!r}); rerun `just stage 4`")
+    return Shipped(package=artifacts / S4_STAGE / name, recipe=winner, download_mb=r.metrics.get("max_download_mb"),
+                   max_download_mb=r.gate_values.get("max_download_mb"))
 
 
 def sha256_file(p: Path) -> str:
