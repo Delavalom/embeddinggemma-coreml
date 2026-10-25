@@ -30,6 +30,7 @@ from egcm.paths import ROOT, STAGES
 from egcm.provenance import stale_reason
 from egcm.report import Report, read_report
 from egcm.stage import run_stage
+from stages.s7_publish import card
 
 STAGE = "s7_publish"
 UPSTREAM = STAGES[:7]  # s0_reference .. s6_device
@@ -119,36 +120,39 @@ public extension EmbeddingGemma {{
 """
 
 
-def model_card(repo: str, results_md: str) -> str:
-    return f"""---
-license: apache-2.0
-base_model: google/embeddinggemma-2
-library_name: coreml
-tags: [coreml, embeddings, image-text, ios, neural-engine]
----
+def model_card(repo: str, results_md: str, values: dict[str, str] | None = None, root: Path = ROOT) -> str:
+    """The Hugging Face README: stages/s7_publish/model_card.md filled from the reports under `root` (card.py)."""
+    return card.render(repo, results_md, card.values(root) if values is None else values)
 
-# EmbeddingGemma 2 for Core ML
 
-`google/embeddinggemma-2` (text and image embeddings in one 768-d space) converted to a multifunction Core ML
-model for the iPhone Neural Engine, with parity checked against the original at every stage.
-
-Use it from Swift with the `EmbeddingGemma` package (`EmbeddingGemma.load(.huggingFace(repo: "{repo}", revision:
-...))`). Every file is listed with its size and SHA-256 in `files.json` and verified on download.
-
-License: Apache-2.0, same as the base model. See NOTICE.
-
-{results_md}
-"""
+# Shipped next to the model (Apache-2.0 section 4(a) and 4(d): the license text and the NOTICE).
+UPLOAD_EXTRAS = ("LICENSE", "NOTICE")
+RELEASE_NOTES_DIR = Path("docs/release-notes")
 
 
 def build_upload(root: Path, repo: str, out: Path) -> str:
-    """The upload folder: the published layout plus README.md (model card) and NOTICE. Returns files.json's sha256.
-    files.json covers the model and tokenizer only (what ModelStore downloads), so it is written first."""
+    """The upload folder: the published layout plus README.md (model card), LICENSE and NOTICE. Returns the sha256
+    of files.json, which covers the model and tokenizer only (what ModelStore downloads), so it is written first."""
     package = root / "artifacts" / "s4_compress" / published.PACKAGE_NAME
     files_sha = published.assemble(package, published.tokenizer_source(root), out)
-    (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text()))
-    shutil.copyfile(root / "NOTICE", out / "NOTICE")
+    (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text(), root=root))
+    copy_extras(root, out)
     return files_sha
+
+
+def copy_extras(root: Path, out: Path) -> None:
+    for name in UPLOAD_EXTRAS:
+        shutil.copyfile(root / name, out / name)
+
+
+def release_notes(root: Path, tag: str, out: Path) -> Path:
+    """The GitHub release notes: docs/release-notes/<tag>.md (hand-written) followed by docs/RESULTS.md (generated),
+    written to `out`. Without a hand-written draft, just RESULTS.md."""
+    draft = root / RELEASE_NOTES_DIR / f"{tag}.md"
+    results = (root / RESULTS_MD).read_text()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text((draft.read_text().rstrip() + "\n\n" + results) if draft.is_file() else results)
+    return out
 
 
 def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
@@ -170,8 +174,8 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     pub.check(["gh", "repo", "edit", "--visibility", "public", "--accept-visibility-change-consequences"])
     pub.check(["git", "push", "origin", "HEAD"])
     pub.check(["git", "push", "origin", tag])
-    pub.check(["gh", "release", "create", tag, "--title", f"EmbeddingGemma {tag}",
-               "--notes-file", str(RESULTS_MD)])
+    notes = release_notes(root, tag, root / "artifacts" / STAGE / "release_notes.md")
+    pub.check(["gh", "release", "create", tag, "--title", f"EmbeddingGemma {tag}", "--notes-file", str(notes)])
     return {"hf_repo": repo, "revision": revision, "files_json_sha256": files_sha, "tag": tag}
 
 

@@ -24,12 +24,19 @@ Only then is `metrics.confirmed = true` set (the one gate, `[s7_publish].confirm
 ## What it does
 
 1. Builds `artifacts/s7_publish/upload/`: the published layout of `egcm.published` (s4's
-   `EmbeddingGemma2.mlpackage/` uncompressed, `tokenizer/`, `files.json` over those two), plus `README.md` (model
-   card: base model, Apache-2.0, `docs/RESULTS.md`, Swift usage) and `NOTICE`.
+   `EmbeddingGemma2.mlpackage/` uncompressed, `tokenizer/`, `files.json` over those two), plus `README.md`, `LICENSE`
+   and `NOTICE` (Apache-2.0 section 4: recipients get the license text and the notices).
+   `README.md` is the model card: `model_card.md` (a `string.Template`) filled by `card.py` from the reports
+   (s0's revision and license, s1-s5 cosines, s4's chosen variant: size, ranking, latency, Neural Engine share,
+   worst images; s6's devices; every stage's `git_sha` and `code_hash`), with `docs/RESULTS.md` embedded. Edit the
+   prose in `model_card.md`; never type a measured number into it. A placeholder without a value raises.
 2. `create_repo(public, exist_ok=True)` and `upload_folder`; the upload's commit SHA is the `revision`.
 3. Writes `swift/Sources/EmbeddingGemma/DefaultModel.swift` (repo, revision, sha256 of `files.json`) and commits it.
 4. `git tag -a v1.0.0`, `gh repo edit --visibility public --accept-visibility-change-consequences`, pushes the
-   branch and the tag, `gh release create v1.0.0 --notes-file docs/RESULTS.md`.
+   branch and the tag, `gh release create v1.0.0` with notes = `docs/release-notes/<tag>.md` (hand-written, if
+   present) followed by `docs/RESULTS.md`, written to `artifacts/s7_publish/release_notes.md`.
+
+Before running it, go through `docs/publish-checklist.md`.
 
 `--tag` overrides `v1.0.0`.
 
