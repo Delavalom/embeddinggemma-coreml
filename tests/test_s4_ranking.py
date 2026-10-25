@@ -32,4 +32,4 @@ def test_zip_and_checksums(tmp_path):
     assert sorted(zipfile.ZipFile(z).namelist()) == ["M.mlpackage/Data/w.bin", "M.mlpackage/Manifest.json"]
     c = ranking.checksums(pkg, z)
     assert set(c["files"]) == {"M.mlpackage/Data/w.bin", "M.mlpackage/Manifest.json"}
-    assert c["zip"]["bytes"] == z.stat().st_size and len(c["zip"]["M.zip"]) == 64
+    assert c["archive"]["bytes"] == z.stat().st_size and len(c["archive"]["M.zip"]) == 64
