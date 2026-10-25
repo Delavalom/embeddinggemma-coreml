@@ -1,5 +1,6 @@
 """s7's guards, with fakes for every side effect: no network, no git writes, no Hugging Face calls."""
 
+import json
 import subprocess
 
 import pytest
@@ -223,3 +224,22 @@ def test_release_notes_are_the_draft_then_results(tmp_path):
     assert s7.release_notes(tmp_path, "v1.0.0", out).read_text() == "# Results\n"
     (tmp_path / "docs" / "release-notes" / "v1.0.0.md").write_text("# v1.0.0\n\nFirst release.\n\n")
     assert s7.release_notes(tmp_path, "v1.0.0", out).read_text() == "# v1.0.0\n\nFirst release.\n\n# Results\n"
+
+
+def test_publish_uses_and_prints_the_hub_spelling_of_the_repo(tmp_path, monkeypatch, capsys):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "RESULTS.md").write_text("| parity |\n")
+    (tmp_path / s7.DEFAULT_MODEL_SWIFT).parent.mkdir(parents=True)
+    monkeypatch.setattr(s7, "build_upload", lambda root, repo, tag, out: SHAS)
+    cards = []
+    monkeypatch.setattr(s7, "write_card", lambda root, repo, out: cards.append(repo))
+    hf = FakeHF()
+    hf.create_repo = lambda **kw: type("RepoUrl", (), {"repo_id": "Delavalom/EmbeddingGemma-2-CoreML"})()
+    run, _ = fake_runner()
+    details = s7.publish(tmp_path, "delavalom/embeddinggemma-2-coreml", "v1.0.0", s7.Publisher(run=run, hf=hf))
+    assert details["hf_repo"] == "Delavalom/EmbeddingGemma-2-CoreML" and cards == [details["hf_repo"]]
+    assert hf.calls[0][1]["repo_id"] == "Delavalom/EmbeddingGemma-2-CoreML"  # the upload went to the Hub's id
+    assert 'defaultRepo = "Delavalom/EmbeddingGemma-2-CoreML"' in (tmp_path / s7.DEFAULT_MODEL_SWIFT).read_text()
+    line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("PUBLISHED_MODEL "))
+    assert json.loads(line.removeprefix("PUBLISHED_MODEL ")) == {
+        "repo": "Delavalom/EmbeddingGemma-2-CoreML", "revision": SHA, "manifest_sha256": "e" * 64}

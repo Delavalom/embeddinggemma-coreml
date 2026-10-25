@@ -29,6 +29,7 @@ from pathlib import Path
 from egcm import manifest, published
 from egcm.paths import ROOT, STAGES
 from egcm.provenance import stale_reason
+from egcm.redact import files_with_home_paths
 from egcm.report import Report, read_report
 from egcm.stage import run_stage
 from stages.s7_publish import card
@@ -38,6 +39,9 @@ UPSTREAM = STAGES[:7]  # s0_reference .. s6_device
 DEFAULT_TAG = "v1.0.0"
 DEFAULT_MODEL_SWIFT = Path("swift/Sources/EmbeddingGemma/DefaultModel.swift")
 RESULTS_MD = Path("docs/RESULTS.md")
+# The Hugging Face repo the docs name. HF_REPO_TARGET must equal it (preflight), so the docs and the upload agree.
+DOCUMENTED_HF_REPO = "Delavalom/embeddinggemma-2-coreml"
+REPO_DOCS = (Path("README.md"), Path("docs/swift-package.md"))
 _REPO = re.compile(r"[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+")
 _SHA = re.compile(r"[0-9a-f]{40}")
 
@@ -94,9 +98,17 @@ class Publisher:
         return r.stdout
 
 
-def preflight(root: Path, tag: str, pub: Publisher) -> list[str]:
-    """Local checks that need no network. Empty if publishing may start."""
+def preflight(root: Path, tag: str, pub: Publisher, repo: str | None = None) -> list[str]:
+    """Local checks that need no network. Empty if publishing may start. With `repo`, the docs must name it."""
     out = []
+    for doc in REPO_DOCS if repo else ():
+        if (root / doc).is_file() and repo not in (root / doc).read_text():
+            out.append(f"{doc} does not name the Hugging Face repo {repo} (HF_REPO_TARGET); update it "
+                       f"(DOCUMENTED_HF_REPO is {DOCUMENTED_HF_REPO})")
+    committed = [root / RESULTS_MD, *sorted((root / "docs" / "results").glob("*.json"))]
+    for f, found in files_with_home_paths(committed).items():
+        out.append(f"{Path(f).relative_to(root)} names {found}; use repo-relative paths "
+                   "(`python -m scripts.save_result <stage>`, `python -m scripts.gen_results`)")
     if pub.run(["git", "status", "--porcelain"]).stdout.strip():
         out.append("the git tree is dirty; commit or stash first (the tag must point at what was tested)")
     if pub.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"]).returncode == 0:
@@ -148,10 +160,17 @@ def build_upload(root: Path, repo: str, tag: str, out: Path) -> dict:
     s4 = published.shipped(root)
     files_sha = published.assemble(s4.package, published.tokenizer_source(root), out)
     manifest_sha = manifest.write(s4, out, revision=tag)  # s4's gated archive, as is
+    write_card(root, repo, out)
+    copy_extras(root, out)
+    if found := files_with_home_paths(out.rglob("*")):
+        raise RuntimeError(f"the upload names absolute local paths: {found}")
+    return {"files_json_sha256": files_sha, "manifest_json_sha256": manifest_sha}
+
+def write_card(root: Path, repo: str, out: Path) -> None:
+    """out/README.md: the model card for `repo`, with the unpacked size from out/manifest.json."""
     vals = card.values(root, json.loads((out / manifest.MANIFEST_JSON).read_text()))
     (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text(), vals, root))
-    copy_extras(root, out)
-    return {"files_json_sha256": files_sha, "manifest_json_sha256": manifest_sha}
+
 
 def copy_extras(root: Path, out: Path) -> None:
     for name in UPLOAD_EXTRAS:
@@ -173,12 +192,18 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     upload = root / "artifacts" / STAGE / "upload"
     shas = build_upload(root, repo, tag, upload)
     log(f"creating https://huggingface.co/{repo} (public) and uploading {upload}")
-    pub.hf.create_repo(repo_id=repo, repo_type="model", private=False, exist_ok=True)
-    info = pub.hf.upload_folder(repo_id=repo, repo_type="model", folder_path=str(upload),
+    created = pub.hf.create_repo(repo_id=repo, repo_type="model", private=False, exist_ok=True)
+    # The repo id exactly as the Hub returns it (case included): apps pin it, so it must be the Hub's spelling.
+    hub_repo = getattr(created, "repo_id", None) or repo
+    if hub_repo != repo:
+        log(f"the Hub spells the repo {hub_repo!r}; using that")
+        write_card(root, hub_repo, upload)
+    info = pub.hf.upload_folder(repo_id=hub_repo, repo_type="model", folder_path=str(upload),
                                 commit_message=f"EmbeddingGemma 2 Core ML {tag}")
     revision = getattr(info, "oid", None)
     if not revision or not _SHA.fullmatch(revision):
         raise RuntimeError(f"the upload returned no commit SHA (got {revision!r})")
+    repo = hub_repo
     log(f"uploaded commit {revision}, sha256(manifest.json) {shas['manifest_json_sha256']}")
     (root / DEFAULT_MODEL_SWIFT).write_text(render_default_model(repo, revision, shas["manifest_json_sha256"]))
     pub.check(["git", "add", str(DEFAULT_MODEL_SWIFT)])
@@ -190,9 +215,14 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     pub.check(["git", "push", "origin", tag])
     notes = release_notes(root, tag, root / "artifacts" / STAGE / "release_notes.md")
     pub.check(["gh", "release", "create", tag, "--title", f"EmbeddingGemma {tag}", "--notes-file", str(notes)])
-    log(f"published https://huggingface.co/{repo}/resolve/{revision}/{manifest.MANIFEST_JSON} "
-        f"(sha256 {shas['manifest_json_sha256']})")
+    log(f"published https://huggingface.co/{repo}/resolve/{revision}/{manifest.MANIFEST_JSON}")
+    print(published_model_line(repo, revision, shas["manifest_json_sha256"]), flush=True)
     return {"hf_repo": repo, "revision": revision, **shas, "tag": tag}
+
+
+def published_model_line(repo: str, revision: str, manifest_sha256: str) -> str:
+    """The three values an app pins (Roll's PublishedModel.current), one JSON object on one line."""
+    return "PUBLISHED_MODEL " + json.dumps({"repo": repo, "revision": revision, "manifest_sha256": manifest_sha256})
 
 
 def make_fill(root: Path, repo: str, tag: str, pub: Publisher):
@@ -200,7 +230,7 @@ def make_fill(root: Path, repo: str, tag: str, pub: Publisher):
         # run_stage already refuses on a bad upstream report; checked again here so nothing below can run without it.
         if problems := upstream_problems(root):
             raise RuntimeError("s0-s6 are not all passed and current: " + "; ".join(problems))
-        if problems := preflight(root, tag, pub):
+        if problems := preflight(root, tag, pub, repo):
             raise RuntimeError("; ".join(problems))
         report.metrics["confirmed"] = True
         report.details["s4_recipe"] = published.shipped(root).recipe

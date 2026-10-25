@@ -33,8 +33,12 @@ let query = try await model.embed(query: "a dog on the beach")
 let score = zip(image, query).reduce(0) { $0 + $1.0 * $1.1 }  // vectors are normalized: dot = cosine
 ```
 
-The first `load` downloads about 480 MB (the uncompressed model plus the tokenizer), checks each file's SHA-256,
-and compiles the model once.
+The first `load` downloads one file, `EmbeddingGemma2.aar` (an LZFSE Apple Archive of the model package and the
+tokenizer), checks its size and SHA-256 against `manifest.json`, unpacks it and compiles the model once. Its size
+is measured by s4 and gated against `max_download_mb` in [`gates.toml`](gates.toml); the measured number is in the
+model card and [`docs/RESULTS.md`](docs/RESULTS.md). An app that downloads and unpacks the archive itself can hand
+the folder over with `.installed(folder, revision:)`, which moves it in place and needs space only for the compiled
+model.
 
 ## What is in the model
 
@@ -59,14 +63,14 @@ gates, and an `inputs_sha256` chain over the reports it read. A report goes stal
 | s1_rewrite | a PyTorch rewrite built for Core ML, matched to s0 (min cosine >= 0.9999) |
 | s2_coreml_fp32 | Core ML FP32, matched to s0 (>= 0.9999) |
 | s3_coreml_ane | Core ML FP16 on the Neural Engine (text >= 0.995; images: min >= 0.99 and 1st percentile >= 0.995; recall@10 >= 0.95; >= 95% of ops on the Neural Engine) |
-| s4_compress | compression variants, smallest first; the first one to pass every gate ships (min cosine >= 0.99, recall@10 >= 0.95, zipped package <= 360 MB) |
+| s4_compress | compression variants, smallest first; the first one to pass every gate ships (min cosine >= 0.99, recall@10 >= 0.95, and the device download, one LZFSE Apple Archive of the package and the tokenizer, within `max_download_mb`) |
 | s5_swift | the Swift package end to end on a Mac: identical token ids, pixels within 1/255, min cosine >= 0.99 |
 | s6_device | PhotoSearchDemo's benchmark on a real iPhone (speed per image and per query, peak memory <= 800 MB) |
 | s7_publish | uploads to Hugging Face, pins the Swift package to that commit, and tags the release (guarded) |
 
 Decisions that changed a gate are recorded in [`docs/decisions/`](docs/decisions). ADR-0006 covers the two
 fixture images that miss the FP16 bar on the Neural Engine and were accepted on retrieval recall. ADR-0007 covers
-measuring compression against the bucketed FP reference, and the 360 MB size limit.
+measuring compression against the bucketed FP reference, and the download size limit.
 
 To reproduce (macOS with Xcode, [`uv`](https://docs.astral.sh/uv/) and [`just`](https://github.com/casey/just)):
 

@@ -1,6 +1,6 @@
 # Pre-publish checklist (v1.0.0)
 
-Go through this list before `HF_REPO_TARGET=<owner>/<name> just publish --confirm`. That one command does every
+Go through this list before `HF_REPO_TARGET=Delavalom/embeddinggemma-2-coreml just publish --confirm`. That one command does every
 public step in order: Hugging Face upload, pinning `DefaultModel.swift`, the tag, the repo visibility flip, the
 push and the GitHub release (`stages/s7_publish/README.md`). **The founder's approval for it covers all of those
 steps at once.** If they should be approved separately, do not run s7; do the steps by hand in its order instead.
@@ -9,21 +9,18 @@ Items marked **[founder]** need explicit founder approval. Nothing else here is 
 
 ## 0. Blockers found while preparing (2026-10-25)
 
-- [ ] **SPM cannot install the package as published.** `Package.swift` is at `swift/Package.swift`, not at the repo
-      root. Swift Package Manager only resolves a remote package whose manifest is at the repository root, so
-      `.package(url: "https://github.com/Delavalom/embeddinggemma-coreml", from: "1.0.0")` (as written in
-      `README.md`, `docs/swift-package.md` and the model card) fails. Fix before tagging. Either:
-      (a) add a root `Package.swift` whose targets point into `swift/Sources` and `swift/Tests` (`path:`), keeping
-      `swift/Package.swift` for local `swift test` (check that test fixture paths built from `#filePath` still
-      resolve); or (b) move the manifest to the root. A root manifest is not in any stage's `code_hash`, but
-      moving files inside `swift/` makes s5-s7 stale (rerun s5 and s6). The package identity then comes from the
-      URL (`embeddinggemma-coreml`), which is what the docs use in `.product(..., package: "embeddinggemma-coreml")`.
-- [ ] **Choose the Hugging Face repo name.** The docs say `Delavalom/embeddinggemma-2-coreml` (a proposal). If
-      `HF_REPO_TARGET` is different, replace it in `README.md` and `docs/swift-package.md` (the model card takes it
-      from `HF_REPO_TARGET` automatically). Create the HF repo **public**, or let s7 create it: an existing
-      private repo stays private (`exist_ok=True`).
-- [ ] **Merge first, then run s7 from the release branch.** This branch (`docs/publish`, from `feat/s6-s7`) does
-      not have ADR-0007, `scripts/gen_results.py` or the s4/s5 changes on `integrate/s5-s7`. s7 pushes `HEAD` and
+- [x] **SPM can install the package.** A root `Package.swift` (resolved 2026-10-25 on `integrate/s5-s7`) declares
+      the same products, platforms and dependency with `path: "swift/Sources/..."`; `swift/Package.swift` stays for
+      local `swift test` and `egcm-parity`. It is outside `swift/`, so the s5-s7 code hashes are unaffected.
+      Checked with `swift package describe` and `swift build` at the repo root (CI builds it too). Keep the two
+      manifests in step.
+- [x] **The Hugging Face repo name is one value.** `stages/s7_publish/run.py` `DOCUMENTED_HF_REPO` =
+      `Delavalom/embeddinggemma-2-coreml`, which `README.md` and `docs/swift-package.md` name (a test checks it).
+      s7's preflight refuses an `HF_REPO_TARGET` those docs do not name. The model card takes the repo from s7.
+      s7 then uses the repo id exactly as the Hub returns it (case included) and prints
+      `PUBLISHED_MODEL {"repo", "revision", "manifest_sha256"}`: the three values apps pin. Create the HF repo
+      **public**, or let s7 create it: an existing private repo stays private (`exist_ok=True`).
+- [ ] **Run s7 from the release branch.** `docs/publish` is merged into `integrate/s5-s7`. s7 pushes `HEAD` and
       tags it, so run it on the branch that should become public (`main` after the merge), with a clean tree.
 
 ## 1. Stage gates
@@ -68,26 +65,30 @@ for large or secret-looking files):
 - [x] Commit metadata: every author and committer is `Delavalom <hi@delavalom.com>`, the allowed contact. 104
       commit messages carry `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. That is intended
       attribution, not a leak.
-- [x] No tracked file contains an absolute `/Users/...` path.
-- [ ] **Watch:** stage reports put absolute local paths in `details` (for example s2 `sizes_mb.packages.*.path`,
-      s4 `build.packages.*.path`, s6 `package`). Committing a report under `docs/results/` (the s6 README asks
-      for this) publishes `/Users/delavalom/...`. That is not a secret, but strip it or accept it knowingly.
-      `docs/RESULTS.md` does not print these paths.
+- [x] No tracked file contains an absolute home path.
+- [x] Reports store repo-relative paths: `egcm.report.write_report` rewrites paths under the repo as relative and
+      the home folder as `~` (`egcm.redact`). Reports written before that still hold absolute paths, so copy a
+      report into `docs/results/` only with `python -m scripts.save_result <stage>`, which relativizes and refuses
+      a home path. s7's preflight refuses `docs/RESULTS.md` or `docs/results/*.json` with a home path, and
+      `build_upload` refuses an upload that contains one. `tests/test_redact.py` fails on a committed one.
 - [ ] Rerun right before the flip, on the branch being published:
       `git grep -n -I -E "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}" -- . ':!uv.lock' | grep -v -E "example\.(com|org)"`
       and `git log --all --format='%ae %ce' | tr ' ' '\n' | sort -u` (expect only `hi@delavalom.com`).
 
 ## 4. Artifact checksums
 
-- [ ] `artifacts/s4_compress/checksums.json` (written only when s4 has a winner) has the zip's sha256 and byte
-      count, plus the sha256 of every file in the package. After s7 builds `artifacts/s7_publish/upload/`, compare
-      each `EmbeddingGemma2.mlpackage/...` entry of `upload/files.json` with `checksums.json`. They must be equal,
-      because `published.assemble` clones the package byte for byte.
+- [ ] `artifacts/s4_compress/checksums.json` (written only when s4 has a winner) has the device archive's sha256
+      and byte count (`"archive"`), plus the sha256 of every file in the package. s7 uploads that archive as is
+      (`egcm.manifest.write` refuses it if its sha256 differs), so `upload/manifest.json` `sha256` and `size` equal
+      `checksums.json` `"archive"`. Compare each `EmbeddingGemma2.mlpackage/...` entry of `upload/files.json` with
+      `checksums.json` too: they must be equal, because `published.assemble` clones the package byte for byte.
 - [ ] The tokenizer entries in `files.json` equal `egcm.published.TOKENIZER_FILES` (`assemble` checks this and
       raises otherwise).
-- [ ] After the upload, `DefaultModel.swift` has `defaultRevision` = the Hugging Face commit SHA from the s7 report
-      (`details.revision`), and `defaultFilesManifestSHA256` = `details.files_json_sha256` = sha256 of the uploaded
-      `files.json`. Check: `curl -sL https://huggingface.co/<repo>/resolve/<revision>/files.json | shasum -a 256`.
+- [ ] After the upload, `DefaultModel.swift` has `defaultRepo` = the Hub's repo id, `defaultRevision` = the Hugging
+      Face commit SHA from the s7 report (`details.revision`), and `defaultManifestSHA256` =
+      `details.manifest_json_sha256` = sha256 of the uploaded `manifest.json`, the same three values as s7's
+      `PUBLISHED_MODEL` line (give those to Roll). Check:
+      `curl -sL https://huggingface.co/<repo>/resolve/<revision>/manifest.json | shasum -a 256`.
 - [ ] Smoke test on a clean device or simulator: `EmbeddingGemma.load(.huggingFace(revision: defaultRevision))`
       downloads, verifies and embeds. A checksum mismatch means the pin is wrong.
 
@@ -104,7 +105,8 @@ print(s7.model_card('<owner>/<name>', Path('docs/RESULTS.md').read_text()))" > /
 - [ ] No `pending` in the preview. s0-s6 passing means every value is present. A `pending` means a key moved:
       fix `card.py`, not the template.
 - [ ] Spot-check against `artifacts/s4_compress/report.json` `details.variants.int8_table4`. The ADR-0007
-      measurement (`measure/fast.json`, commit 77d1241) gave: zip 349.7 MB, package 452.4 MB, min cosine text
+      measurement (`measure/fast.json`, commit 77d1241) gave: package zip 349.7 MB (the archive replaced the zip as the
+      gated download in 7e630f3), package 452.4 MB, min cosine text
       0.99791 / image 0.99133, recall@10 vs bucketed FP 0.962 / 0.966, p5 Spearman 0.966 / 0.972, `embed_text_16`
       4.4 ms, `embed_image_70_square` 45.8 ms, Neural Engine share 99.81%. The stage run should be close to
       these, not necessarily identical.
@@ -114,17 +116,17 @@ print(s7.model_card('<owner>/<name>', Path('docs/RESULTS.md').read_text()))" > /
         GPU 2.8x slower at budget 70, recall@10 0.9975 / 0.9992 with only those two swapped in.
       - "the v1.0.0 build Mac is an M1 Pro with macOS 26": no report records the host. Confirm it is the machine
         that ran s4.
-      - "about 32 MB for the tokenizer".
-      - The gate values quoted in the prose (360 MB, 800 MB, 60 ms target, 0.99 / 0.95 / 0.9, 0.95 / 0.03).
-      - `README.md` and `docs/swift-package.md`: "about 480 MB" download, "3x that in free space".
+      - The gate values quoted in the prose (800 MB, 60 ms target, 0.99 / 0.95 / 0.9, 0.95 / 0.03). The download
+        limit and every size (archive, unpacked, package) come from the s4 report and `manifest.json`.
 
 ## 6. The public steps (all done by `just publish --confirm`)
 
 - [ ] **[founder]** Hugging Face upload: `create_repo(public)` + `upload_folder` of
-      `artifacts/s7_publish/upload/` (model, tokenizer, `files.json`, `README.md`, `LICENSE`, `NOTICE`).
+      `artifacts/s7_publish/upload/` (`manifest.json` + `EmbeddingGemma2.aar` for apps; the unpacked model,
+      tokenizer and `files.json` for Python; `README.md`, `LICENSE`, `NOTICE`).
 - [ ] **[founder]** Swift package release: s7 commits `DefaultModel.swift`, creates `git tag -a v1.0.0`, pushes
       the branch and the tag, and runs `gh release create v1.0.0`. The notes are `docs/release-notes/v1.0.0.md`
-      followed by `docs/RESULTS.md`. Blocked by item 0 (the root `Package.swift`).
+      followed by `docs/RESULTS.md`.
 - [ ] **[founder]** GitHub repo visibility flip: `gh repo edit --visibility public
       --accept-visibility-change-consequences` on `Delavalom/embeddinggemma-coreml` (currently PRIVATE). Every
       branch and all history become public, not just `main`. Delete branches that should not be public first.

@@ -22,9 +22,9 @@ Needs fresh passing s4 and s5. To choose a device:
 The model is not on Hugging Face yet (that is s7), so this stage bundles it:
 
 1. `egcm.published.assemble` writes the published layout to `Examples/PhotoSearchDemo/Model/` (gitignored):
-   `EmbeddingGemma2.mlpackage/` (an APFS clone of the package s4's report says it shipped, `egcm.published.shipped`,
-   recorded as `details.s4_recipe`; `--package <path>` bundles another one and records null), `tokenizer/` (from
-   s0's snapshot or the Swift tests' cache, sha256-checked) and `files.json`.
+   `EmbeddingGemma2.mlpackage/` and `tokenizer/` from s4's device archive (sha256-checked, unpacked into
+   `artifacts/s6_device/unpacked/`, recipe recorded as `details.s4_recipe`; `--package <path>` bundles another
+   package with the local tokenizer and records null), and `files.json`.
 2. A build script in `project.yml` copies `Model/` into the app bundle when it exists.
 3. The app loads it with `EmbeddingGemma.load(.file(bundleURL))`, which verifies every file against `files.json`,
    copies it to Application Support and compiles it once. The app reports `model_revision` =
@@ -53,7 +53,8 @@ The benchmark (`BenchmarkRunner.swift`): the newest 1,000 photos (960 px from `P
 20 queries against them, then the newest 200 at budget 280. Times cover `embed(image:)` only (preprocessing and
 prediction, not the Photos fetch), after `prewarm()` (recorded as `load_ms`). The device name is not recorded.
 
-After a run, keep the result: `cp artifacts/s6_device/report.json docs/results/s6_<model>.json` and commit it.
+After a run, keep the result: `python -m scripts.save_result s6_device` (writes `docs/results/s6_<model>.json` with
+repo-relative paths and no home folder) and commit it.
 
 ## Known failure modes
 

@@ -2,8 +2,9 @@
 
 The Swift package on macOS against s0: token ids, preprocessed pixels, and end-to-end vectors.
 
-Run: `just stage 5` (the `convert` group). Needs fresh passing s0 and s4. The package is the one s4's report says it shipped
-(`egcm.published.shipped`: `details.package`, recipe `details.winner`, recorded here as `details.s4_recipe`).
+Run: `just stage 5` (the `convert` group). Needs fresh passing s0 and s4. It runs on s4's device archive (`details.device_archive`, sha256 from
+`checksums.json`), unpacked into `artifacts/s5_swift/unpacked/` (`egcm.manifest.unpack`): the package and tokenizer
+bytes a phone downloads. Recorded as `details.s4_recipe`, `details.device_archive`, `details.device_archive_sha256`.
 
 ## What it does
 
