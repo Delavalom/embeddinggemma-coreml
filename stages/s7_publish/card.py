@@ -131,6 +131,7 @@ def values(root: Path, manifest: dict | None = None) -> dict[str, str]:
         "ms_image_70_square": _num(_get(v, "latency_cpu_and_ne", "embed_image_70_square", "median_ms"), 1),
         "ane_fraction": _pct(v.get("ane_fraction_min"), 2),
         "s5_cos": _num(m(s5, "min_cosine"), 5), "s5_pixel": _num(m(s5, "max_pixel_abs_diff"), 6),
+        "s5_runtime": _cos(m(s5, "min_cosine_runtime")),
         "s5_tokens": str(m(s5, "token_ids_identical")) if s5 else PENDING,
         "s6_ms_70": _num(m(s6, "ms_per_image_70_median"), 1), "s6_ms_280": _num(m(s6, "ms_per_image_280_median"), 1),
         "s6_ms_query": _num(m(s6, "ms_per_query_median"), 1), "s6_rss": _num(m(s6, "max_peak_rss_mb"), 0),

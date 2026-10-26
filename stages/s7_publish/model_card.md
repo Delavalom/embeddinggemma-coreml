@@ -87,7 +87,7 @@ budgets. Cosine values are the **minimum** over all inputs, not the mean.
 | s2 | Core ML FP32 vs the official model | $s2_text | $s2_image |
 | s3 | Core ML FP16 on the Neural Engine vs the official model (at least $s3_ane of ops on the Neural Engine) | $s3_text | $s3_image (1st percentile $s3_p1_image) |
 | s4 | **shipped `$variant`** on `CPU_AND_NE` vs the official model | **$text_cos** | **$image_cos** (1st percentile $p1_image_cos) |
-| s5 | the Swift package end to end on a Mac (tokenizer + preprocessing + model) | $s5_cos (text and image) | |
+| s5 | the Swift package end to end on a Mac (tokenizer + preprocessing + model) vs the official model on the same decoded pixels; vs Python Core ML on identical inputs: $s5_runtime | $s5_cos (text and image) | |
 
 Retrieval with the shipped variant (the 120 queries ranking the 200 images, budget 70 / 280):
 

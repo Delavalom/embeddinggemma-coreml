@@ -26,7 +26,9 @@ func cosine(_ a: [Float], _ b: [Float]) -> Float {
                 "artifacts/s4_compress has no .mlpackage: run just stage 4"),
        .serialized)
 struct EndToEndTests {
-  static let minCosine: Float = 0.99  // [s5_swift].min_cosine
+  // The [s5_swift].min_cosine threshold, here against s0 on a sample of non-fragile images (the stage compares with
+  // the FP reference on Swift's pixels, ADR-0008).
+  static let minCosine: Float = 0.99
 
   @Test func textsMatchS0() async throws {
     let fx = try TestSupport.load(EmbeddingFixtures.self, "embeddings.json")

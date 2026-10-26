@@ -1,7 +1,7 @@
 # ADR-0008: s5 measures the Swift runtime on decode-identical pixels, and the task level as s4 does
 
-**Status:** Proposed, 2026-10-25. **Not accepted.** `gates.toml` is unchanged. The founder decides; until then
-`[s5_swift] min_cosine >= 0.99` stands and s5 stays failed.
+**Status:** accepted, 2026-10-25, founder approved (option 4). See "Decision (accepted)" at the end for the gate keys
+as implemented; proposed 2026-10-25. Amends ADR-0004 (its "Consequences": see below).
 
 ## Context
 
@@ -166,6 +166,49 @@ README "known failure modes") and egcm-parity, in one commit with this ADR marke
 
 ## Reproduce
 
-- Task level on the s5 vectors: `uv run --exact --group convert python -m scripts.s5_task_metrics`.
+- Task level on the s5 vectors against s0: `uv run --exact --group convert python -m scripts.s5_task_metrics` (on
+  the pre-ADR-0008 `parity.json`; since acceptance, s5 itself reports this as `details.vs_s0`).
 - The per-id, sensitivity and swapped-reference runs used throwaway scripts outside the repo (2026-10-25). The
   method is the one described under "How the pixels were made"; nothing in `stages/` or `gates.toml` was changed.
+
+## Decision (accepted, 2026-10-25)
+
+The founder accepted option 4. `gates.toml [s5_swift]` as implemented:
+
+| key | threshold | what it compares |
+|---|---|---|
+| `token_ids_identical` | `== true` | unchanged: Swift's token ids vs s0's, 200 texts |
+| `max_pixel_abs_diff` | `<= 0.003922` | unchanged: p99 over PNG fixtures and synthetic images (ADR-0004) |
+| `min_cosine_runtime` | `>= 0.9999` | Swift vs Python Core ML (the same s4 package, the same compute units) on Swift's exact inputs: its token ids and its bucket images. All 600 vectors: text, PNG and JPEG |
+| `min_cosine` | `>= 0.99` | s4's key: the Swift vectors vs the FP reference on Swift's pixels, text and image combined |
+| `min_recall_at_10`, `min_p5_spearman_top50` | `>= 0.95`, `>= 0.9` | s4's keys and thresholds, against the FP reference on Swift's pixels, worst budget |
+| `min_t2i_top1_in_top10`, `max_i2i_label_p10_drop` | `>= 0.95`, `<= 0.03` | s4's keys and thresholds, against s0's exact-aspect vectors (`emb_raw`) |
+
+Different from option 4 as written above, deliberately:
+- The runtime check is the new key `min_cosine_runtime`, not a redefinition of `min_cosine`. `min_cosine` keeps
+  s4's meaning (text and image vs the FP reference), so option 4's `min_cosine_image >= 0.99` becomes s4's
+  `min_cosine >= 0.99`. That is stricter: it also covers the text vectors (Swift's ids are gated identical to s0's,
+  so s0's `emb` is the FP reference on the same input).
+- The FP reference on Swift's pixels is s0's `emb_bucket` for every image whose Swift bucket image is byte-identical
+  to s0's (sha256; in practice the 30 PNGs), and the s1 rewrite in FP32 for the others (the 170 JPEGs). One process
+  per budget (`stages/s5_swift/fp_reference.py`). s5 therefore lists `s1_rewrite` as an upstream stage.
+
+Implementation:
+- `egcm-parity --pixels <dir>` writes every fixture's uint8 bucket image as a lossless PNG. s5 reads each one back
+  and checks its sha256 against the one egcm-parity recorded before anything is compared (`stages/s5_swift/pixels.py`).
+- `stages/s5_swift/runtime.py`: Python Core ML in its own process. `stages/s5_swift/task_level.py`: the comparisons
+  (pure functions).
+- Recorded, not gated, in the report's details: `min_cosine_vs_s0` and `cosine` (per group, vs s0), `vs_s0` (the
+  task-level metrics against s0's PIL reference), `decoder` (the FP reference on Swift's pixels vs s0: the decoder's
+  own cost), and the peak RSS of each process.
+
+### How this amends ADR-0004
+
+ADR-0004's "Consequences" said that if s5's end-to-end cosine failed on JPEGs and passed on PNGs, "the fix would be a
+different decoder, not a looser cosine gate". The measurements above show that expectation was wrong. The FP32 model
+itself moves to 0.9716 from the decoder change alone. So matching PIL's decoder would only tune the test to its
+reference: it would not make the app's vectors more correct. App photos are decoded by ImageIO in any case. ADR-0004's
+pixel decision stands unchanged: decode-identical inputs and the 1/255 gate. Its end-to-end clause is replaced by
+this ADR: the decoder's effect on the vectors is recorded (`decoder`), and the gates compare against references
+computed on the same pixels.
+

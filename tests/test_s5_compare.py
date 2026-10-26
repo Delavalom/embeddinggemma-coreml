@@ -109,19 +109,20 @@ def test_summarize_identical_run_passes_every_gate():
     m, d = c.summarize(*fake_run())
     assert m["token_ids_identical"] is True
     assert m["max_pixel_abs_diff"] == 0.0
-    assert m["min_cosine"] == pytest.approx(1.0)
+    assert "min_cosine" not in m  # ADR-0008: against s0 it is recorded, the gated cosines are in task_level
+    assert d["min_cosine_vs_s0"] == pytest.approx(1.0)
     assert set(d["cosine"]["text"]) == {"query", "document"}
     assert set(d["cosine"]["image"]) == {"70_png", "70_jpeg", "280_png", "280_jpeg"}
     assert d["missing"] == [] and d["unexpected"] == []
 
 
-def test_summarize_min_cosine_is_over_texts_and_images_combined():
-    m, d = c.summarize(*fake_run(image_emb={"i1_280": unit(99)}))
+def test_summarize_min_cosine_vs_s0_is_over_texts_and_images_combined():
+    _, d = c.summarize(*fake_run(image_emb={"i1_280": unit(99)}))
     expected = float(np.dot(unit(99), unit(30 + 1 + 280)))
-    assert m["min_cosine"] == pytest.approx(expected)
+    assert d["min_cosine_vs_s0"] == pytest.approx(expected)
     assert d["cosine"]["image"]["280_jpeg"]["worst"] == {"i1": pytest.approx(expected)}
-    m, _ = c.summarize(*fake_run(text_emb={"t1": -unit(11)}))
-    assert m["min_cosine"] == pytest.approx(-1.0)
+    _, d = c.summarize(*fake_run(text_emb={"t1": -unit(11)}))
+    assert d["min_cosine_vs_s0"] == pytest.approx(-1.0)
 
 
 def test_summarize_jpeg_pixels_do_not_gate_png_pixels_do():
@@ -137,7 +138,12 @@ def test_summarize_missing_outputs_fail_visibly():
     del parity["synthetic"]["syn_70"]
     m, d = c.summarize(parity, *rest)
     assert d["missing"] == ["i0_280", "syn_70"]
-    assert m["max_pixel_abs_diff"] == math.inf and math.isnan(m["min_cosine"])
+    assert m["max_pixel_abs_diff"] == math.inf and math.isnan(d["min_cosine_vs_s0"])
+
+    parity, *rest = fake_run()
+    parity["images"]["zz_70"] = parity["images"]["i0_70"]
+    m, d = c.summarize(parity, *rest)
+    assert d["unexpected"] == ["zz_70"] and m["max_pixel_abs_diff"] == math.inf
 
     parity, *rest = fake_run()
     parity["texts"]["t1"]["ids"] = [2, 1]

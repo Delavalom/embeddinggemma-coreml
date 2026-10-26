@@ -88,12 +88,34 @@ def s5_section(r: Report | str | None) -> list[str]:
     for g in ("png", "synthetic", "jpeg"):
         lines.append(f"| {g} | {_cell(px.get(f'{g}_pixel_p99'))} | {_cell(px.get(f'{g}_pixel_max'))} "
                      f"| {px.get('bit_exact', {}).get(g, '-')} |")
+    lines += s5_references(r.details)
     groups = [(f"text {k}", v) for k, v in cos.get("text", {}).items()]
     groups += [(f"image {k}", v) for k, v in cos.get("image", {}).items()]
     if groups:
-        lines += ["", "| vectors | n | min cosine | mean cosine |", "|---|---|---|---|"]
+        lines += ["", "Against s0 (recorded only; on JPEGs it includes the decoder, ADR-0008):", "",
+                  "| vectors | n | min cosine | mean cosine |", "|---|---|---|---|"]
         lines += [f"| {k} | {v.get('n', '-')} | {_cell(v.get('min'))} | {_cell(v.get('mean'))} |" for k, v in groups]
     return lines
+
+
+def s5_references(d: dict) -> list[str]:
+    """ADR-0008: one row per reference. Runtime and the FP reference on Swift's pixels are gated; s0 and the
+    decoder are recorded."""
+    rows = []
+    groups = (d.get("runtime") or {}).get("by_group") or {}
+    if groups:
+        low = min(g["min"] for g in groups.values())
+        rows.append(("Swift vs Python Core ML, same inputs (gated)", low, None, None))
+    for key, label in (("vs_fp_on_swift_pixels", "Swift vs FP reference on Swift's pixels (gated)"),
+                       ("vs_s0", "Swift vs s0 (recorded)"),
+                       ("decoder", "FP on Swift's pixels vs s0: the decoder (recorded)")):
+        if v := d.get(key):
+            rows.append((label, v.get("min_cosine", v.get("min_cosine_image")), v.get("min_recall_at_10"),
+                         v.get("min_p5_spearman_top50")))
+    if not rows:
+        return []
+    out = ["", "| comparison | min cosine | recall@10 (worst budget) | p5 Spearman top-50 |", "|---|---|---|---|"]
+    return out + [f"| {k} | {_cell(c)} | {_cell(r)} | {_cell(s)} |" for k, c, r, s in rows]
 
 
 def device_section(reports: dict, results: dict) -> list[str]:

@@ -64,13 +64,15 @@ gates, and an `inputs_sha256` chain over the reports it read. A report goes stal
 | s2_coreml_fp32 | Core ML FP32, matched to s0 (>= 0.9999) |
 | s3_coreml_ane | Core ML FP16 on the Neural Engine (text >= 0.995; images: min >= 0.99 and 1st percentile >= 0.995; recall@10 >= 0.95; >= 95% of ops on the Neural Engine) |
 | s4_compress | compression variants, smallest first; the first one to pass every gate ships (min cosine >= 0.99, recall@10 >= 0.95, and the device download, one LZFSE Apple Archive of the package and the tokenizer, within `max_download_mb`) |
-| s5_swift | the Swift package end to end on a Mac: identical token ids, pixels within 1/255, min cosine >= 0.99 |
+| s5_swift | the Swift package end to end on a Mac: identical token ids, pixels within 1/255, the same vectors as Python Core ML on identical inputs (min cosine >= 0.9999), and s4's task-level gates against the FP model on the same pixels |
 | s6_device | PhotoSearchDemo's benchmark on a real iPhone (speed per image and per query, peak memory <= 800 MB) |
 | s7_publish | uploads to Hugging Face, pins the Swift package to that commit, and tags the release (guarded) |
 
 Decisions that changed a gate are recorded in [`docs/decisions/`](docs/decisions). ADR-0006 covers the two
 fixture images that miss the FP16 bar on the Neural Engine and were accepted on retrieval recall. ADR-0007 covers
-measuring compression against the bucketed FP reference, and the download size limit.
+measuring compression against the bucketed FP reference, and the download size limit. ADR-0008 covers s5: the Swift
+package is checked against Python Core ML and the FP model on its own decoded pixels, because ImageIO and PIL decode
+JPEGs slightly differently and the model itself moves with that (recorded, not gated).
 
 To reproduce (macOS with Xcode, [`uv`](https://docs.astral.sh/uv/) and [`just`](https://github.com/casey/just)):
 

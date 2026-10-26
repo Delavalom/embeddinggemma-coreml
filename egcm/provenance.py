@@ -34,7 +34,8 @@ STAGE_INPUTS: dict[str, StageInputs] = {
     "s2_coreml_fp32": StageInputs(upstream=("s0_reference", "s1_rewrite")),
     "s3_coreml_ane": StageInputs(upstream=("s0_reference", "s1_rewrite", "s2_coreml_fp32")),
     "s4_compress": StageInputs(upstream=("s0_reference", "s3_coreml_ane")),
-    "s5_swift": StageInputs(upstream=("s0_reference", "s4_compress")),
+    # s5's FP reference on Swift's pixels is the s1 rewrite (ADR-0008), so s1 must have passed
+    "s5_swift": StageInputs(upstream=("s0_reference", "s1_rewrite", "s4_compress")),
     "s6_device": StageInputs(upstream=("s4_compress", "s5_swift")),
     "s7_publish": StageInputs(upstream=("s0_reference", "s1_rewrite", "s2_coreml_fp32", "s3_coreml_ane",
                                         "s4_compress", "s5_swift", "s6_device")),
@@ -57,8 +58,11 @@ STAGE_CODE: dict[str, tuple[str, ...]] = {
                       "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s4_compress": ("stages/s4_compress", "egcm/compress.py", *_BUILD, "egcm/placement.py", "egcm/e5cache.py",
                     "egcm/e5prune.py", "egcm/ranking.py", "egcm/archive.py", *_REWRITE, *_COMPARE, *_LOCK),
-    # s5-s7 take s4's package and device archive through egcm/published.py and egcm/manifest.py
-    "s5_swift": ("stages/s5_swift", "swift", "egcm/published.py", "egcm/manifest.py", *_COMPARE, *_LOCK),
+    # s5-s7 take s4's package and device archive through egcm/published.py and egcm/manifest.py. s5 also runs it with
+    # coremltools (runtime parity) and the s1 rewrite on Swift's pixels (FP reference), and s4's ranking (ADR-0008).
+    "s5_swift": ("stages/s5_swift", "swift", "egcm/published.py", "egcm/manifest.py", "egcm/convert.py",
+                 "egcm/evaluate.py", "egcm/e5cache.py", "egcm/e5prune.py", "egcm/ranking.py", *_REWRITE, *_COMPARE,
+                 *_LOCK),
     "s6_device": ("stages/s6_device", "swift", "Examples", "egcm/metrics.py", "egcm/paths.py", "egcm/published.py",
                   "egcm/manifest.py", "egcm/buckets.py", *_LOCK),
     "s7_publish": ("stages/s7_publish", "swift", "egcm/paths.py", "egcm/published.py", "egcm/manifest.py",
