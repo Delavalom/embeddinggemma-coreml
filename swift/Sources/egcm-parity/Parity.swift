@@ -6,9 +6,61 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Command-line options. Every path is required except `synthetic`.
+/// The packages `--model` names (ADR-0010).
+enum ModelPackages: Equatable {
+  /// `--model <pkg>`: one 14-function package that serves every budget.
+  case all(URL)
+  /// `--model 70=<pkg> --model 280=<pkg>`: one package per image budget.
+  case perBudget([Int: URL])
+
+  static let budgets = [70, 280]
+
+  /// The package used for `budget`.
+  func package(budget: Int) -> URL? {
+    switch self {
+    case .all(let url): url
+    case .perBudget(let urls): urls[budget]
+    }
+  }
+
+  /// What `--model` was given, for parity.json: the path, or `70=<pkg> 280=<pkg>`.
+  var argument: String {
+    switch self {
+    case .all(let url): url.path
+    case .perBudget(let urls): urls.keys.sorted().map { "\($0)=\(urls[$0]!.path)" }.joined(separator: " ")
+    }
+  }
+
+  /// Every `--model` value in order: one bare path, or `<budget>=<path>` once for each of 70 and 280.
+  static func parse(_ values: [String]) throws -> ModelPackages {
+    guard !values.isEmpty else { throw ParityError.usage("--model is required") }
+    var perBudget: [Int: URL] = [:]
+    var bare: [String] = []
+    for v in values {
+      if let m = v.wholeMatch(of: /([0-9]+)=(.+)/) {
+        guard let b = Int(m.1), budgets.contains(b) else {
+          throw ParityError.usage("--model \(v): the budget must be 70 or 280")
+        }
+        guard perBudget[b] == nil else { throw ParityError.usage("--model \(b)=... is given twice") }
+        perBudget[b] = URL(filePath: String(m.2)).standardizedFileURL
+      } else {
+        bare.append(v)
+      }
+    }
+    if bare.count == 1 && perBudget.isEmpty { return .all(URL(filePath: bare[0]).standardizedFileURL) }
+    guard bare.isEmpty else {
+      throw ParityError.usage("--model takes one package path, or one 70=<pkg> and one 280=<pkg>")
+    }
+    if let missing = budgets.first(where: { perBudget[$0] == nil }) {
+      throw ParityError.usage("--model \(missing)=<pkg> is missing (one package per budget needs both)")
+    }
+    return .perBudget(perBudget)
+  }
+}
+
+/// Command-line options. Every path is required except `synthetic` and `pixels`.
 struct Options {
-  var model: URL
+  var model: ModelPackages
   var tokenizer: URL
   var fixtures: URL
   var out: URL
@@ -26,23 +78,26 @@ struct Options {
     usage: egcm-parity --model <EmbeddingGemma2.mlpackage> --tokenizer <dir> --fixtures <repo>/fixtures --out <json>
                        [--synthetic <dir of PNGs>] [--pixels <dir>] [--samples 8192]
                        [--compute-units cpuAndNeuralEngine|cpuOnly|all] [--limit N]
+           --model <pkg>                          one 14-function package for both budgets
+           --model 70=<pkg> --model 280=<pkg>     one package per image budget (ADR-0010)
     """
 
   static func parse(_ args: [String]) throws -> Options {
     var values: [String: String] = [:]
+    var models: [String] = []
     var i = 0
     while i < args.count {
       let key = args[i]
       guard key.hasPrefix("--"), i + 1 < args.count else { throw ParityError.usage("bad argument \(key)") }
-      values[String(key.dropFirst(2))] = args[i + 1]
+      if key == "--model" { models.append(args[i + 1]) } else { values[String(key.dropFirst(2))] = args[i + 1] }
       i += 2
     }
     func path(_ k: String) throws -> URL {
       guard let v = values.removeValue(forKey: k) else { throw ParityError.usage("--\(k) is required") }
       return URL(filePath: v).standardizedFileURL
     }
-    var o = Options(model: try path("model"), tokenizer: try path("tokenizer"), fixtures: try path("fixtures"),
-                    out: try path("out"))
+    var o = Options(model: try ModelPackages.parse(models), tokenizer: try path("tokenizer"),
+                    fixtures: try path("fixtures"), out: try path("out"))
     if values["synthetic"] != nil { o.synthetic = try path("synthetic") }
     if values["pixels"] != nil { o.pixels = try path("pixels") }
     if let s = values.removeValue(forKey: "samples") {
@@ -159,8 +214,14 @@ struct ImageResult: Encodable {
   let emb: [Float]?
 }
 struct ParityOutput: Encodable {
+  /// `--model` as given: the package path, or `70=<pkg> 280=<pkg>`.
   let model: String
+  /// The package used per budget, keyed `"70"`, `"280"`.
+  let models: [String: String]
+  /// `modelRevision` of the budget 70 model (texts are embedded with it).
   let model_revision: String
+  /// `modelRevision` per budget, keyed `"70"`, `"280"` (equal for one 14-function package).
+  let model_revisions: [String: String]
   let compute_units: String
   let samples: Int
   let texts: [String: TextResult]
