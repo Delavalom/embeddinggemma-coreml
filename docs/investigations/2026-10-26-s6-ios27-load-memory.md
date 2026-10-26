@@ -31,14 +31,27 @@ at 1.97 GB. `embed_image_280_square` alone, cool phone: OK first try (185 s, 125
   ~60 s, image 70 ~130-240 s, image 280 ~185 s each on the phone).
 - Gate: `[s6_device] max_peak_rss_mb = 800`. Not changed; any change needs an ADR the founder approves.
 
+## 3. The warm cost scales with `model.mil` size (Mac, all functions of each package loaded in turn)
+
+Sub-packages built with `scripts/probes/extract_functions.py`, measured with `mac_load_probe.swift`.
+
+| Package | `model.mil` | weights | warm load per function | warm peak | cold peak |
+|---|---|---|---|---|---|
+| 1 text function | 1.6 MB | 213 MB | 0.24 s | 45 MB | 853 MB |
+| 4 text functions | 6.5 MB | 214 MB | 0.9 s | 127 MB | 1,083 MB |
+| 5 image-70 functions | 22.5 MB | 297 MB | 2.9 s | 424-541 MB | 973 MB |
+| all 14 (shipped) | 51.6 MB | 400 MB | 6.5-7 s | 969 MB | up to 2.0 GB |
+
+So warm loads cost about 20 MB of transient memory per MB of `model.mil`. Cold compiles cost about 0.85-1.1 GB whatever
+the package, once per function per install. The s6 benchmark reinstalls the app, so its peak includes cold compiles.
+That means a peak gate of 800 MB fails on a fresh install with any packaging. Gating the warm (steady-state) peak and
+recording the cold-compile peak would be a gate change, so it needs an ADR.
+
 ## Next (not done)
 
-1. Finish the split measurement: `scripts/probes/extract_functions.py` builds sub-packages (`text4`: 4 text
-   functions, mil 6.5 MB, weights 214 MB; `img70`: 5 image-70 functions, mil 22.5 MB, weights 297 MB). Measure cold
-   and warm peaks with `mac_load_probe.swift` (`./probe <mlmodelc> ne <fn,...>`) to see whether the warm cost scales
-   with `model.mil` size.
+1. ADR: how s6 measures memory (warm peak gated, cold compile recorded?), for the founder.
 2. Pick the packaging: per-tier packages (text + one image budget, ~29 MB mil, one download of about today's size)
-   vs. separate text and image packages (cheapest loads, ~460 MB download, over the 360 MB gate) vs. fewer functions
+   (~29 MB mil, warm peak about 600 MB estimated) vs. separate text and image packages (cheapest loads, ~460 MB download, over the 360 MB gate) vs. fewer functions
    (e.g. enumerated shapes instead of one function per bucket). Then rerun s4-s6 (s4 = new packages; the download gate
    still applies).
 3. Roll: first launch compiles for minutes; compile in the background, text functions first.
