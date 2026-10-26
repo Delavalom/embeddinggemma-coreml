@@ -46,7 +46,7 @@ min_p5_spearman_top50 = 0.9
 min_t2i_top1_in_top10 = 0.95
 max_i2i_label_p10_drop = 0.03
 # The device download: one Apple Archive (LZFSE) of the package and the tokenizer, egcm.archive (ADR-0007: raised
-# from 300, founder approved 2026-10-25).
+# from 300, founder approved 2026-10-25). Since ADR-0010, one archive per image budget; this is the larger one.
 max_download_mb = 360
 
 [s4_compress.targets]
