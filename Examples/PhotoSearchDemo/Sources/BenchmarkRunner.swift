@@ -10,8 +10,9 @@ import UIKit
 /// Writes `Documents/s6_device.json` (read by stages/s6_device/run.py) and shows "DONE".
 ///
 /// Per-image time covers `embed(image:)` only (preprocessing + prediction), not the Photos fetch. Each budget's
-/// functions are loaded first (`prewarm`, recorded as `load_ms`). Peak memory is `phys_footprint` (what iOS
-/// counts against the app's memory limit), sampled every 100 ms for the whole run.
+/// functions are loaded first (`prewarm`, recorded as `load_ms` and per function as `function_ms`). Peak memory is
+/// `phys_footprint` (what iOS counts against the app's memory limit), sampled every 100 ms for the whole run. s6
+/// launches it after the `-compile` run (`CompileRunner`, ADR-0009), so its loads are warm.
 @MainActor @Observable
 final class BenchmarkRunner {
   static let resultURL = URL.documentsDirectory.appending(path: "s6_device.json")
@@ -67,7 +68,11 @@ final class BenchmarkRunner {
       var phase = BudgetResult()
       let t0 = ContinuousClock.now
       var model: EmbeddingGemma? = try await DemoModel.load(budget: step.budget)
-      try await model!.prewarm()
+      for name in EmbeddingGemma.textFunctions + EmbeddingGemma.imageFunctions(budget: model!.imageBudget) {
+        let f0 = ContinuousClock.now
+        try await model!.prewarm([name])
+        phase.functionMS[name] = (ContinuousClock.now - f0).ms
+      }
       phase.loadMS = (ContinuousClock.now - t0).ms
       result.modelRevision = model!.modelRevision
       let index = try VectorIndex(url: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
@@ -139,10 +144,12 @@ struct BudgetResult: Encodable {
   var images = 0
   var skipped = 0
   var loadMS = 0.0
+  /// Load time per function. After the compile run (ADR-0009) every one should be a warm load.
+  var functionMS: [String: Double] = [:]
   var msPerImage = Stats([])
   var thermalStateAfter = ""
   enum CodingKeys: String, CodingKey {
-    case images, skipped, loadMS = "load_ms", msPerImage = "ms_per_image", thermalStateAfter = "thermal_state_after"
+    case images, skipped, loadMS = "load_ms", functionMS = "function_ms", msPerImage = "ms_per_image", thermalStateAfter = "thermal_state_after"
   }
 }
 

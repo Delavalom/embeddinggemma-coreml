@@ -7,7 +7,9 @@ struct PhotoSearchDemoApp: App {
 
   var body: some Scene {
     WindowGroup {
-      if launch.benchmark {
+      if launch.compile {
+        CompileView(runID: launch.runID)
+      } else if launch.benchmark {
         BenchmarkView(runID: launch.runID)
       } else {
         SearchView()
@@ -16,14 +18,17 @@ struct PhotoSearchDemoApp: App {
   }
 }
 
-/// `-benchmark` runs `BenchmarkRunner` instead of the search UI; `-runID <id>` is echoed into the result file so
-/// stages/s6_device/run.py can tell this run's result from an older one. A literal `--` is ignored.
+/// `-compile` runs `CompileRunner` and `-benchmark` runs `BenchmarkRunner` instead of the search UI; `-runID <id>`
+/// is echoed into the result file so stages/s6_device/run.py can tell this run's result from an older one. A literal
+/// `--` is ignored.
 struct LaunchArguments {
+  let compile: Bool
   let benchmark: Bool
   let runID: String
 
   init(_ args: [String]) {
     let args = args.filter { $0 != "--" }
+    compile = args.contains("-compile")
     benchmark = args.contains("-benchmark")
     if let i = args.firstIndex(of: "-runID"), i + 1 < args.count { runID = args[i + 1] } else { runID = "manual" }
   }

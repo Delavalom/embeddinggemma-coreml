@@ -111,6 +111,9 @@ def test_devicectl_commands_and_fetch(tmp_path):
     assert copy_cmd[copy_cmd.index("--source") + 1] == "Documents/s6_device.json"
     launch = ctl.launch_command(d, "abc")
     assert "--console" in launch and launch[-4:] == ["--", "-benchmark", "-runID", "abc"]
+    assert ctl.launch_command(d, "abc", "-compile")[-4:] == ["--", "-compile", "-runID", "abc"]
+    ctl.fetch_result(d, tmp_path / "c.json", dev.COMPILE_RESULT_FILE)
+    assert calls[-1][calls[-1].index("--source") + 1] == "Documents/s6_compile.json"
     ctl.install(d, tmp_path / "A.app")
     assert calls[-1][:5] == ["xcrun", "devicectl", "device", "install", "app"]
 
@@ -120,11 +123,13 @@ def test_fetch_returns_none_when_copy_fails(tmp_path):
     assert ctl.fetch_result(dev.parse_devices(listing())[0], tmp_path / "r.json") is None
 
 
-def result(model="iPhone14,3", rss=512.0, ms70=48.0):
+def result(model="iPhone14,3", rss=512.0, ms70=48.0, cold=1100.0, load_ms=900.0):
     return {"run_id": "r", "status": "done", "device_model": model, "peak_rss_mb": rss,
-            "budgets": {"70": {"images": 1000, "ms_per_image": {"median": ms70, "p90": ms70 * 1.2}},
+            "budgets": {"70": {"images": 1000, "ms_per_image": {"median": ms70, "p90": ms70 * 1.2},
+                               "function_ms": {"embed_text_16": 300.0, "embed_image_70_square": load_ms}},
                         "280": {"images": 200, "ms_per_image": {"median": 140.0, "p90": 160.0}}},
-            "query": {"queries": 20, "ms": {"median": 9.0, "p90": 12.0}}}
+            "query": {"queries": 20, "ms": {"median": 9.0, "p90": 12.0}},
+            "compile": {"run_id": "c", "status": "done", "peak_rss_mb": cold, "available_memory_mb_at_launch": 3000.0}}
 
 
 def test_summarize_and_gates():
@@ -132,6 +137,8 @@ def test_summarize_and_gates():
     metrics, details = s6.summarize([result(), result("iPhone16,1", rss=700.0, ms70=80.0)], target)
     assert metrics["min_devices"] == 2
     assert metrics["max_peak_rss_mb"] == 700.0
+    assert metrics["max_cold_compile_peak_mb"] == 1100.0
+    assert details["available_memory_mb_at_launch"] == {"iPhone14,3": 3000.0, "iPhone16,1": 3000.0}
     assert metrics["ms_per_image_70_median"] == 80.0
     assert metrics["ms_per_query_median"] == 9.0
     assert details["target_ms_per_image_70"] == target
@@ -143,9 +150,19 @@ def test_summarize_and_gates():
     r = evaluate(Report(stage="s6_device", metrics=heavy), "s6_device")
     assert not r.passed and r.failures == ["max_peak_rss_mb: 900.0 not <= 800"]
 
+    hot, _ = s6.summarize([result(cold=2200.0)], target)
+    r = evaluate(Report(stage="s6_device", metrics=hot), "s6_device")
+    assert not r.passed and r.failures == ["max_cold_compile_peak_mb: 2200.0 not <= 2100"]
+
     none, _ = s6.summarize([], target)
     r = evaluate(Report(stage="s6_device", metrics=none), "s6_device")
     assert not r.passed and "max_peak_rss_mb: metric missing" in r.failures
+    assert "max_cold_compile_peak_mb: metric missing" in r.failures
+
+
+def test_cold_loads_flags_compiles_in_the_benchmark():
+    assert s6.cold_loads(result()) == []
+    assert s6.cold_loads(result(load_ms=45_000.0)) == ["70/embed_image_70_square"]
 
 
 def test_fill_rejects_another_models_result(tmp_path, monkeypatch):
@@ -171,6 +188,15 @@ def test_fill_rejects_another_models_result(tmp_path, monkeypatch):
     entries = json.loads((tmp_path / "Model" / "files.json").read_text())
     expected = published.sha256_file(tmp_path / "Model" / "files.json")
     ours = result() | {"model_revision": "file-" + expected[:16]}
+    stale_compile = ours | {"compile": result()["compile"] | {"model_revision": "file-other"}}
+    monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: stale_compile)
+    with pytest.raises(RuntimeError, match="the compile ran model 'file-other'"):
+        fill(Report(stage="s6_device"))
+    ours["compile"]["model_revision"] = ours["model_revision"]
+    cold_bench = ours | {"budgets": result(load_ms=60_000.0)["budgets"]}
+    monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: cold_bench)
+    with pytest.raises(RuntimeError, match="compiled 70/embed_image_70_square"):
+        fill(Report(stage="s6_device"))
     monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: ours)
     r = Report(stage="s6_device")
     fill(r)

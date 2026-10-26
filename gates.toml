@@ -73,7 +73,10 @@ min_t2i_top1_in_top10 = 0.95
 max_i2i_label_p10_drop = 0.03
 
 [s6_device]
+# ADR-0009 (accepted 2026-10-26). The benchmark's peak phys_footprint, in a launch after the compile run (warm loads).
 max_peak_rss_mb = 800
+# The compile run's peak: every function compiled once, one at a time, right after the install.
+max_cold_compile_peak_mb = 2100
 min_devices = 1
 
 [s6_device.targets]

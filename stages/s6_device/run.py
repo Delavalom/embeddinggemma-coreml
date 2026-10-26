@@ -1,7 +1,8 @@
 # group: convert
 """s6_device: PhotoSearchDemo's benchmark on a real iPhone.
 
-Gates (gates.toml [s6_device]): max_peak_rss_mb (maximum over devices), min_devices (devices with a result).
+Gates (gates.toml [s6_device], ADR-0009): max_peak_rss_mb (the warm benchmark's peak, maximum over devices),
+max_cold_compile_peak_mb (the compile run's peak after a fresh install), min_devices (devices with a result).
 The speed target ([s6_device.targets]) is recorded next to the measurement, never gated.
 See stages/s6_device/README.md.
 
@@ -24,13 +25,24 @@ from egcm.gates import targets
 from egcm.paths import ROOT, stage_dir
 from egcm.report import Report
 from egcm.stage import run_stage
-from stages.s6_device.device import BUNDLE_ID, Device, Devicectl, pick_device, poll_result
+from stages.s6_device.device import (
+    BUNDLE_ID,
+    COMPILE_RESULT_FILE,
+    RESULT_FILE,
+    Device,
+    Devicectl,
+    pick_device,
+    poll_result,
+)
 from stages.s6_device.team import ensure_team_xcconfig
 
 STAGE = "s6_device"
 DEMO = ROOT / "Examples" / "PhotoSearchDemo"
 # The published folder (egcm.published) the app bundles as its `Model` resource. Gitignored; written by this stage.
 MODEL_DIR = DEMO / "Model"
+# A function load in the benchmark slower than this was a compile, not a warm load (ADR-0009). Measured on the
+# iPhone 13 Pro Max: cold compiles 45-240 s per function, warm loads of the whole 14-function package 6.5-7 s.
+MAX_WARM_LOAD_MS = 30_000
 
 
 def log(msg: str) -> None:
@@ -70,23 +82,39 @@ def build_app(device: Device, out: Path) -> Path:
     return app
 
 
-def benchmark(device: Device, app: Path, out: Path, ctl: Devicectl | None = None) -> dict:
-    """Installs, launches with `-benchmark`, and waits for this run's result file."""
-    ctl = ctl or Devicectl()
+def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str) -> dict:
+    """Launches the installed app with `mode` (`-compile` or `-benchmark`) and waits for this run's `source`."""
     run_id = uuid.uuid4().hex
-    log(f"installing on {device.marketing_name} ({device.product_type}, iOS {device.os_version})")
-    ctl.install(device, app)
-    console = out / f"console_{device.product_type}.log"
+    console = out / f"console_{device.product_type}{mode}.log"
     with open(console, "w") as f:
-        proc = subprocess.Popen(ctl.launch_command(device, run_id), stdout=f, stderr=subprocess.STDOUT)
-        log("launched. Tap Allow Full Access on the phone if it asks for Photos (first run only), "
-            f"and keep it unlocked. Console: {console}")
+        proc = subprocess.Popen(ctl.launch_command(device, run_id, mode), stdout=f, stderr=subprocess.STDOUT)
+        log(f"launched {mode}. Keep the phone unlocked. Console: {console}")
         try:
-            return poll_result(lambda: ctl.fetch_result(device, out / "result.json"), run_id,
-                               app_exited=proc.poll, log=log)
+            return poll_result(lambda: ctl.fetch_result(device, out / Path(source).name, source), run_id,
+                               app_exited=proc.poll, log=log, name=source)
         finally:
             if proc.poll() is None:
                 proc.terminate()
+
+
+def benchmark(device: Device, app: Path, out: Path, ctl: Devicectl | None = None) -> dict:
+    """Installs, compiles every function in one launch (`-compile`), then benchmarks in a new process
+    (`-benchmark`), so the benchmark's loads are warm (ADR-0009). Returns the benchmark's result with the compile
+    run's under `compile`."""
+    ctl = ctl or Devicectl()
+    log(f"installing on {device.marketing_name} ({device.product_type}, iOS {device.os_version})")
+    ctl.install(device, app)
+    log("compiling every function (minutes on a fresh install)")
+    compiled = launch(device, out, ctl, "-compile", COMPILE_RESULT_FILE)
+    log("benchmarking. Tap Allow Full Access on the phone if it asks for Photos (first run only)")
+    result = launch(device, out, ctl, "-benchmark", RESULT_FILE)
+    return result | {"compile": compiled}
+
+
+def cold_loads(result: dict, limit_ms: float = MAX_WARM_LOAD_MS) -> list[str]:
+    """`budget/function` for every benchmark load slower than `limit_ms`: compiles the compile run did not cache."""
+    return [f"{b}/{name}" for b, phase in sorted(result.get("budgets", {}).items())
+            for name, ms in sorted(phase.get("function_ms", {}).items()) if ms > limit_ms]
 
 
 def _worst(results: list[dict], get) -> float | None:
@@ -102,6 +130,7 @@ def summarize(results: list[dict], target_ms_70: float) -> tuple[dict, dict]:
     metrics = {
         "min_devices": len(results),
         "max_peak_rss_mb": _worst(results, lambda r: r.get("peak_rss_mb")),
+        "max_cold_compile_peak_mb": _worst(results, lambda r: r.get("compile", {}).get("peak_rss_mb")),
         "ms_per_image_70_median": _worst(results, ms("70")),
         "ms_per_image_280_median": _worst(results, ms("280")),
         "ms_per_query_median": _worst(results, lambda r: r.get("query", {}).get("ms", {}).get("median")),
@@ -109,6 +138,8 @@ def summarize(results: list[dict], target_ms_70: float) -> tuple[dict, dict]:
     details = {
         "target_ms_per_image_70": target_ms_70,
         "meets_target_70": {r["device_model"]: (m := ms("70")(r)) is not None and m <= target_ms_70 for r in results},
+        "available_memory_mb_at_launch": {r["device_model"]: r.get("compile", {}).get("available_memory_mb_at_launch")
+                                          for r in results},
         "devices": {r["device_model"]: r for r in results},
     }
     return metrics, details
@@ -130,8 +161,13 @@ def make_fill(args: argparse.Namespace):
         ctl = Devicectl()
         device = pick_device(ctl.list_devices(), args.device)
         result = benchmark(device, build_app(device, out), out, ctl)
-        if result.get("model_revision") != expected_revision:
-            raise RuntimeError(f"the app ran model {result.get('model_revision')!r}, expected {expected_revision!r}")
+        for run, revision in (("benchmark", result.get("model_revision")),
+                              ("compile", result.get("compile", {}).get("model_revision"))):
+            if revision != expected_revision:
+                raise RuntimeError(f"the {run} ran model {revision!r}, expected {expected_revision!r}")
+        if cold := cold_loads(result):
+            raise RuntimeError(f"the benchmark compiled {', '.join(cold)} (over {MAX_WARM_LOAD_MS} ms) after the "
+                               "compile run; its peak is not a warm peak")
         (out / "devices").mkdir(exist_ok=True)
         (out / "devices" / f"{device.product_type}.json").write_text(json.dumps(result, indent=1) + "\n")
         metrics, details = summarize([result], targets(STAGE)["target_ms_per_image_70"])

@@ -11,10 +11,14 @@ Needs fresh passing s4 and s5. To choose a device:
 
 - `min_devices` (≥ 1): devices that wrote a result in this run.
 - `max_peak_rss_mb` (≤ 800): the maximum over devices of the app's peak `phys_footprint` (what iOS counts against
-  the memory limit), sampled every 100 ms for the whole benchmark.
+  the memory limit), sampled every 100 ms for the whole benchmark. The benchmark runs after the compile run, in a
+  new process, so every function load is warm: the memory of every launch after the first (ADR-0009).
+- `max_cold_compile_peak_mb` (≤ 2,100): the same measurement over the compile run, which loads every function once,
+  one at a time, right after the install. It happens once per install or app update (ADR-0009).
 - Recorded, not gated: `ms_per_image_70_median`, `ms_per_image_280_median`, `ms_per_query_median` (the worst
   device's medians), and in `details` the target `[s6_device.targets].target_ms_per_image_70` with
-  `meets_target_70` per device. Each device's full result (p90, first/cold value, model load time, thermal state
+  `meets_target_70` per device, and `available_memory_mb_at_launch` per device (`os_proc_available_memory()`, the
+  app's headroom before iOS ends it). Each device's full result (p90, first/cold value, model load time, thermal state
   after each budget, photos skipped) is in `details.devices` and `artifacts/s6_device/devices/<model>.json`.
 
 ## How the app gets the model
@@ -43,11 +47,17 @@ s7 has run. The bundled app is about the size of the uncompressed package (the s
 3. `xcodegen generate`, then `xcodebuild -configuration Release -destination id=<udid> -allowProvisioningUpdates
    build` (Release, because the timed path includes the Swift preprocessing). The old `.app` is deleted first and
    the new one checked with `codesign --verify`.
-4. `devicectl device install app`, then `devicectl device process launch --console --terminate-existing <bundle>
-   -- -benchmark -runID <uuid>` (console in `artifacts/s6_device/console_<model>.log`).
-5. Polls `devicectl device copy from --domain-type appDataContainer --source Documents/s6_device.json` every 15 s
+4. `devicectl device install app` (installing a new build discards the on-device compiles), then two launches,
+   each `devicectl device process launch --console --terminate-existing <bundle> -- <mode> -runID <uuid>` (console
+   in `artifacts/s6_device/console_<model><mode>.log`):
+   - `-compile` (`CompileRunner.swift`): installs the model and loads every function the benchmark uses, one at a
+     time, releasing each. Writes `Documents/s6_compile.json`: peak, load time per function, thermal state, and
+     `os_proc_available_memory()` at launch.
+   - `-benchmark` (`BenchmarkRunner.swift`, below). Writes `Documents/s6_device.json`.
+5. For each launch, polls `devicectl device copy from --domain-type appDataContainer --source <file>` every 15 s
    for up to 30 min. Only a file with this run's `run_id` counts; `status: error` fails at once with the app's
-   message; the app exiting without a result fails too.
+   message; the app exiting without a result fails too. The stage fails if either run used another model, or if
+   a benchmark function load took over 30 s (a compile the compile run did not cache).
 
 The benchmark (`BenchmarkRunner.swift`): the newest 1,000 photos (960 px from `PHImageManager`) at budget 70, the
 20 queries against them, then the newest 200 at budget 280. Times cover `embed(image:)` only (preprocessing and
@@ -58,6 +68,10 @@ repo-relative paths and no home folder) and commit it.
 
 ## Known failure modes
 
+- **"the benchmark compiled <function> ... after the compile run"**: iOS discarded a compile between the two
+  launches (low storage, or an OS update in between). Rerun.
+- **`max_cold_compile_peak_mb` fails, `max_peak_rss_mb` passes**: the package is too large to compile within the
+  limit on this phone even though it runs fine afterwards. See ADR-0009.
 - **"connect an iPhone with Developer Mode"**: not connected, locked, not trusted, or Developer Mode off.
 - **Waits, then times out**: the Photos prompt was not answered. Tap **Allow Full Access** on the phone (first run
   only). Keep the phone unlocked: the app disables the idle timer, but a manual lock suspends it.
