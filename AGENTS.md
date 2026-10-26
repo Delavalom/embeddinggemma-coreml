@@ -56,7 +56,7 @@ They are declared as conflicting in `pyproject.toml`, so they cannot be installe
 - The comparison comes from the key: `min_*` is `>=`, `max_*` is `<=`, a bool is `==`. Any other key raises when `gates.toml` is loaded. **The prefix is the comparison direction only; each metric's docstring defines its aggregation** (for example `min_p5_spearman_top50` is the 5th percentile over queries, not a minimum).
 - Recorded-only numbers (such as the s6 speed target) live in a `[stage.targets]` subtable. They are never gated; read them with `egcm.gates.targets(stage_key)`.
 - A metric that is missing, non-numeric or non-finite is a recorded gate failure, not a crash. Non-finite floats are written to JSON as the strings `"NaN"`, `"Infinity"`, `"-Infinity"` and restored on read.
-- `min_cosine` in s4 and s5 is the minimum over text and image vectors combined. s1 to s3 gate text and image separately.
+- `min_cosine` in s4 and s5 is the minimum over text and image vectors combined. s1 to s3 gate text and image separately. s5 compares against the FP reference on Swift's own pixels, and gates Swift vs Python Core ML on identical inputs as `min_cosine_runtime` (ADR-0008).
 - Ranking metrics (`recall_at_k`, `spearman_topk`) take keyword arguments `ref=(queries, docs)` and `new=(queries, docs)`. s3 and s4 use only the 120 app queries (`kind=query`), not the document-style texts, through `egcm.ranking`; the reference for the gated ranking is s0's bucketed image vectors (ADR-0006, ADR-0007).
 
 ## Provenance and staleness
@@ -82,7 +82,7 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | text min cosine ≥ 0.995; image min cosine ≥ 0.99 and 1st percentile ≥ 0.995; recall@10 ≥ 0.95 and p5 Spearman ≥ 0.9 against the bucketed FP reference (ADR-0006); ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
 | **s4_compress** | Linear weight quantization; ships `int8_table4` (int8 weights, int4 table; ADR-0007) | min cosine ≥ 0.99 (text and image combined); recall@10 ≥ 0.95 and 5th-percentile Spearman ρ of the top-50 ≥ 0.9 against the bucketed FP reference; exact-aspect top-1 in the top 10 ≥ 0.95 and image→image category precision@10 drop ≤ 0.03 (bucketing); device download (Apple Archive, LZFSE, with the tokenizer) ≤ 360 MB |
-| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255 (p99 on decode-identical inputs, ADR-0004); end-to-end min cosine ≥ 0.99 against s0 |
+| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255 (p99 on decode-identical inputs, ADR-0004); Swift vs Python Core ML on identical inputs min cosine ≥ 0.9999; s4's task-level gates (min cosine ≥ 0.99, recall@10, p5 Spearman, bucketing) against the FP reference on Swift's pixels (ADR-0008). Against s0 it is recorded only |
 | **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target (`[s6_device.targets]`), not gated |
 | **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
 
@@ -124,7 +124,7 @@ egcm/                     shared Python library
   parts.py                builds packages one process per part and per merge (16 GB Mac), resumable, memory/disk guards
   compress.py             s4 recipes: deterministic linear quantization (int8 / int4 per block), table separately
   archive.py              the device download: one Apple Archive (LZFSE) of the package + tokenizer (s4 gate, s7)
-  ranking.py              task-level metrics vs s0 (s3, s4): cosines, ranking vs bucketed FP, bucketing fidelity
+  ranking.py              task-level metrics (s3, s4, s5): cosines, ranking vs bucketed FP, bucketing fidelity
   probe.py                activation max-abs probe (s3, diagnostic)
   placement.py            Neural Engine placement per function from MLComputePlan (s3, s4)
   fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)
@@ -141,7 +141,8 @@ swift/                    SwiftPM package (Package.swift here). EmbeddingGemma: 
                           (torch uint8 AA bicubic port), TextEncoder, ModelStore (files.json, SHA-256, compile),
                           DeviceTier, the EmbeddingGemma actor. EmbeddingIndex: VectorIndex. Tests/.../Fixtures from
                           stages/s5_swift/export_fixtures.py; RuntimeTests need make_contract_model, EndToEndTests s4
-                          egcm-parity: the s5 CLI (stages/s5_swift/run.py runs it; `--measure <pkg>` without a report)
+                          egcm-parity: the s5 CLI (stages/s5_swift/run.py runs it; `--measure <pkg>` without a report;
+                          `--pixels <dir>` dumps the bucket images, EgcmParityTests)
 Examples/PhotoSearchDemo/ SwiftUI demo app + s6 benchmark (XcodeGen project.yml; Team.xcconfig and Model/ gitignored)
 docs/decisions/           ADR-NNNN-*.md (numbered)
 docs/RESULTS.md           GENERATED by `just results`: parity and benchmark tables. Never hand-edit

@@ -35,7 +35,11 @@ def test_every_s4_variant_and_s5_pixels_are_listed(repo):
         "pixels": {"png_pixel_p99": 0.0, "png_pixel_max": 0.0, "jpeg_pixel_p99": 0.0078, "jpeg_pixel_max": 0.12,
                    "synthetic_pixel_p99": 0.0, "synthetic_pixel_max": 0.0,
                    "bit_exact": {"png": "60/60", "jpeg": "0/340", "synthetic": "20/20"}},
-        "cosine": {"text": {"query": {"n": 120, "min": 0.995, "mean": 0.999}}, "image": {}}})
+        "cosine": {"text": {"query": {"n": 120, "min": 0.995, "mean": 0.999}}, "image": {}},
+        "runtime": {"by_group": {"text_query": {"min": 0.99999}, "image_280_jpeg": {"min": 0.99998}}},
+        "vs_fp_on_swift_pixels": {"min_cosine": 0.9902, "min_recall_at_10": 0.9575, "min_p5_spearman_top50": 0.9645},
+        "vs_s0": {"min_cosine": 0.9712, "min_recall_at_10": 0.9467, "min_p5_spearman_top50": 0.9528},
+        "decoder": {"min_cosine_image": 0.9716, "min_recall_at_10": 0.9683, "min_p5_spearman_top50": 0.9691}})
     text = render(repo)
     assert "Chosen: `int8_table4` (winner: `int8_table4`)" in text and "Download limit: 360 MB." in text
     row = "| int8_table4 | 350.2 | 360 | 0.991 | 0.96 | 0.93 | 0.97 | 0.01 | 0.99 | 0.85 | all | int8, table int4 |"
@@ -43,6 +47,9 @@ def test_every_s4_variant_and_s5_pixels_are_listed(repo):
     assert "| int8 | 410 |" in text and "fails max_download_mb" in text
     assert "| png | 0 | 0 | 60/60 |" in text and "| jpeg | 0.0078 | 0.12 | 0/340 |" in text
     assert "| text query | 120 | 0.995 | 0.999 |" in text
+    assert "| Swift vs Python Core ML, same inputs (gated) | 0.99998 | - | - |" in text
+    assert "| Swift vs FP reference on Swift's pixels (gated) | 0.9902 | 0.9575 | 0.9645 |" in text
+    assert "| FP on Swift's pixels vs s0: the decoder (recorded) | 0.9716 | 0.9683 | 0.9691 |" in text
 
 
 def test_device_results_from_docs_results(repo):

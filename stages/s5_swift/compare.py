@@ -5,7 +5,9 @@
   decode-identical inputs only (ADR-0004): the PNG fixtures against s0's stored bucket pixels and the synthetic PNGs
   against torch's uint8 antialiased bicubic. The JPEG number includes the decoder and is recorded, not gated.
   If any image lands in a different bucket than the reference, the pixels are not comparable and the metric is inf.
-- `min_cosine`: minimum over every text vector and every image vector at both budgets (s0's `emb`, `emb_bucket`).
+- `min_cosine_vs_s0` (recorded in details, not gated since ADR-0008): minimum over every text vector and every image
+  vector at both budgets against s0's `emb` / `emb_bucket`. On JPEGs it includes the decoder (ImageIO vs PIL); the
+  gated cosines are in stages/s5_swift/task_level.py.
 """
 
 from __future__ import annotations
@@ -95,7 +97,7 @@ def cosine_summary(ids: list[str], got: np.ndarray, ref: np.ndarray, worst: int 
 
 def summarize(parity: Mapping, ref_texts: Mapping[str, Mapping], ref_images: Mapping[int, Mapping[str, Mapping]],
               formats: Mapping[str, str], ref_synthetic: Mapping[str, Mapping]) -> tuple[dict, dict]:
-    """(metrics, details) for the s5 report.
+    """(metrics, details) for the s5 report: the token and pixel gates, and the cosines against s0 (recorded).
 
     parity: egcm-parity's JSON. ref_texts: id -> {"ids", "emb"} (s0). ref_images: budget -> id -> {"bucket", "u8"
     (HxWx3), "emb"} (s0's bucket path). formats: image id -> "png" or "jpeg". ref_synthetic: "<name>_<budget>" ->
@@ -131,10 +133,10 @@ def summarize(parity: Mapping, ref_texts: Mapping[str, Mapping], ref_images: Map
     complete = not missing and not extra and bool(text_cos) and bool(image_cos)
     metrics = {
         "token_ids_identical": not bad_ids and bool(tids),
-        "max_pixel_abs_diff": tally.metric() if not missing else float("inf"),
-        "min_cosine": min(mins) if complete else float("nan"),
+        "max_pixel_abs_diff": tally.metric() if not missing and not extra else float("inf"),
     }
-    details = {"token_id_mismatches": bad_ids, "texts_compared": len(tids), "missing": missing, "unexpected": extra,
+    details = {"min_cosine_vs_s0": min(mins) if complete else float("nan"),
+               "token_id_mismatches": bad_ids, "texts_compared": len(tids), "missing": missing, "unexpected": extra,
                "pixels": tally.details(), "cosine": {"text": text_cos, "image": image_cos},
                "model_revision": parity.get("model_revision"), "compute_units": parity.get("compute_units")}
     return metrics, details

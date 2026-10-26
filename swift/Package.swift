@@ -14,5 +14,6 @@ let package = Package(
     .executableTarget(name: "egcm-parity", dependencies: ["EmbeddingGemma"]),
     .testTarget(name: "EmbeddingGemmaTests", dependencies: ["EmbeddingGemma"], exclude: ["Fixtures"]),
     .testTarget(name: "EmbeddingIndexTests", dependencies: ["EmbeddingIndex"]),
+    .testTarget(name: "EgcmParityTests", dependencies: ["egcm-parity"]),
   ]
 )

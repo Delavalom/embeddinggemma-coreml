@@ -1,50 +1,79 @@
 # s5_swift
 
-The Swift package on macOS against s0: token ids, preprocessed pixels, and end-to-end vectors.
+The Swift package on macOS: token ids and preprocessed pixels against s0, and its vectors against Python Core ML and
+the FP reference on the same inputs (ADR-0008).
 
-Run: `just stage 5` (the `convert` group). Needs fresh passing s0 and s4. It runs on s4's device archive (`details.device_archive`, sha256 from
-`checksums.json`), unpacked into `artifacts/s5_swift/unpacked/` (`egcm.manifest.unpack`): the package and tokenizer
-bytes a phone downloads. Recorded as `details.s4_recipe`, `details.device_archive`, `details.device_archive_sha256`.
+Run: `just stage 5` (the `convert` group). Needs fresh passing s0, s1 and s4. It runs on s4's device archive
+(`details.device_archive`, sha256 from `checksums.json`), unpacked into `artifacts/s5_swift/unpacked/`
+(`egcm.manifest.unpack`): the package and tokenizer bytes a phone downloads. Recorded as `details.s4_recipe`,
+`details.device_archive`, `details.device_archive_sha256`.
 
 ## What it does
 
+Three heavy steps, each in its own process, one at a time (16 GB Mac). Peak RSS of each is in `details.peak_rss`.
+
 1. `run.py` writes the synthetic pattern (`export_fixtures.synthetic`) at `SYNTHETIC_SIZES` as PNGs into
    `artifacts/s5_swift/synthetic/`, with torch's uint8 antialiased bicubic of each as the reference.
-2. It runs `swift run -c release egcm-parity` (`swift/Sources/egcm-parity/`). The CLI goes through the path an app
-   takes: it puts the package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`,
-   sha256-checked by `egcm.published.tokenizer_source`) in a
-   local published folder with `files.json`, installs it with `ModelStore` (verify, compile) and loads
-   `EmbeddingGemma.load(.file(...), dimensions: 768)` once per budget, on `.cpuAndNeuralEngine`. For every fixture
-   text (prompt by kind: `query` or `document`) it records the token ids and the vector; for every fixture image and
-   each synthetic PNG at budgets 70 and 280 it records the bucket, the sha256 of the uint8 bucket image and 8,192
-   pixel values (the `export_fixtures` sampling rule), and for fixture images the vector. Output:
-   `artifacts/s5_swift/parity.json`.
-3. `compare.py` (pure functions, `tests/test_s5_compare.py`) compares that with s0 and the torch references.
+2. **Swift.** `swift run -c release egcm-parity` (`swift/Sources/egcm-parity/`) goes through the path an app takes:
+   it puts the package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`, sha256-checked by
+   `egcm.published.tokenizer_source`) in a local published folder with `files.json`, installs it with `ModelStore`
+   (verify, compile) and loads `EmbeddingGemma.load(.file(...), dimensions: 768)` once per budget, on
+   `.cpuAndNeuralEngine`. For every fixture text (prompt by kind: `query` or `document`) it records the token ids and
+   the vector. For every fixture image and each synthetic PNG at budgets 70 and 280 it records the bucket, the sha256
+   of the uint8 bucket image and 8,192 pixel values (the `export_fixtures` sampling rule), and for fixture images
+   the vector. With `--pixels artifacts/s5_swift/pixels/` it also writes each fixture's whole bucket image as
+   `<id>_<budget>.png` (lossless). Output: `artifacts/s5_swift/parity.json`.
+3. **Python Core ML** (`runtime.py`): the same package, compiled by coremltools, on the same compute units, one
+   function at a time. Inputs are Swift's own token ids and bucket images (read back and sha256-checked by
+   `pixels.py`). Output: `runtime.npz`.
+4. **FP reference on Swift's pixels** (`fp_reference.py`, one process per budget): the s1 rewrite in FP32 on the CPU,
+   for the images whose Swift bucket image is not byte-identical to s0's (the JPEGs: ImageIO decodes them, PIL
+   decoded s0's). For the byte-identical ones (the PNGs) the FP reference is s0's `emb_bucket`. Output: `fp_<budget>.npz`.
+5. `compare.py` and `task_level.py` (pure functions; `tests/test_s5_compare.py`, `tests/test_s5_task_level.py`) turn
+   that into the metrics.
 
 ## Metrics
+
+Gated (`gates.toml [s5_swift]`, ADR-0008):
 
 - `token_ids_identical`: every one of the 200 texts has exactly s0's ids (`ids_<id>` in `texts.npz`), none missing.
 - `max_pixel_abs_diff`: the 99th percentile of `|swift - reference|` (0-1 units) over the pixel samples of the
   decode-identical inputs (ADR-0004): the PNG fixtures against s0's stored bucket pixels and the synthetic PNGs
-  against torch. It is `inf` if any image lands in another bucket than the reference or an output is missing.
-  `details.pixels` also has the JPEG numbers (`jpeg_pixel_p99`, decoder included, recorded only), the maxima, and the
-  bit-exact counts per group.
-- `min_cosine`: the minimum over the 200 text vectors and the 400 image vectors (both budgets), each against s0's
-  vector for the same input (`emb`, `emb_bucket`). `details.cosine` splits it by text kind and by budget and format,
-  with the five worst ids of each.
+  against torch. It is `inf` if any image lands in another bucket than the reference or an output is missing or
+  unexpected. `details.pixels` also has the JPEG numbers (`jpeg_pixel_p99`, decoder included, recorded only), the
+  maxima, and the bit-exact counts per group.
+- `min_cosine_runtime`: Swift vs Python Core ML on identical inputs, minimum over all 600 vectors (200 texts, 400
+  images). `details.runtime.by_group` splits it by text kind and by budget and format. It is NaN (a failure) if a
+  vector is missing on the Python side.
+- `min_cosine`, `min_recall_at_10`, `min_p5_spearman_top50`, `min_t2i_top1_in_top10`, `max_i2i_label_p10_drop`: s4's
+  task-level metrics (`egcm.ranking.metrics`, the same keys and thresholds) on the Swift vectors, against the FP
+  reference on Swift's pixels (texts: s0's `emb`). Details: `details.vs_fp_on_swift_pixels`.
+
+Recorded only:
+
+- `details.min_cosine_vs_s0` and `details.cosine`: every vector against s0's (`emb`, `emb_bucket`), by text kind and by
+  budget and format, with the five worst ids of each. This was the gate before ADR-0008. On JPEGs it includes the
+  decoder.
+- `details.vs_s0`: the task-level metrics against s0's PIL-decoded reference.
+- `details.decoder`: the FP reference on Swift's pixels against s0, which is what the decoder alone costs (no Swift,
+  no compression).
+- `details.fp_reference`: per budget, how many image references came from the FP32 rewrite vs s0's `emb_bucket`.
 
 ## Gate
 
-`gates.toml [s5_swift]`: `token_ids_identical == true`, `max_pixel_abs_diff <= 0.003922`, `min_cosine >= 0.99`.
+`gates.toml [s5_swift]`: `token_ids_identical == true`, `max_pixel_abs_diff <= 0.003922`, `min_cosine_runtime >=
+0.9999`, `min_cosine >= 0.99`, `min_recall_at_10 >= 0.95`, `min_p5_spearman_top50 >= 0.9`,
+`min_t2i_top1_in_top10 >= 0.95`, `max_i2i_label_p10_drop <= 0.03`.
 
 ## Measuring a package without a report
 
 ```
-uv run --exact --group convert python -m stages.s5_swift.run --measure <pkg> [--s0 <dir>] [--compute-units cpuOnly] [--limit N]
+uv run --exact --group convert python -m stages.s5_swift.run --measure <pkg> [--s0 <dir>] [--compute-units cpuOnly] [--limit N] [--skip-fp]
 ```
 
 runs the same comparison on any package with the spec section 7 I/O and prints the metrics and details as JSON
-(files go to `artifacts/s5_swift/measure/`). On the contract model (below), 2026-10-24, M1 Pro: ids identical for
+(files go to `artifacts/s5_swift/measure/`). `--skip-fp` leaves out the FP reference and the task-level metrics. The
+ranking metrics need at least 50 images, so a `--limit` below 50 requires it. On the contract model (below), 2026-10-24, M1 Pro: ids identical for
 200/200 texts; pixels bit-exact for 60/60 PNG and 20/20 synthetic cases, so `max_pixel_abs_diff` 0; JPEG p99 2/255,
 max 31/255, 0/340 bit-exact. Its cosines mean nothing (it is not a model of anything); they only show the plumbing.
 
@@ -121,7 +150,17 @@ command as the message; with `EGCM_REQUIRE_ARTIFACTS=1` (CI) it fails instead.
   `artifacts/tokenizer/` is used.
 - **`max_pixel_abs_diff` is inf:** read `details.pixels.bucket_mismatches` and `details.missing`. A bucket mismatch
   means `Buckets.swift` and `egcm/buckets.py` disagree on that size; that is a bug, not a precision question.
-- **Cosine fails only on JPEG images (`details.cosine.image.*_jpeg`) while PNG passes:** the decoder (ADR-0004).
-  Compare with s4's cosine for the same ids, which used PIL's decode: if s4 passes them, it is ImageIO vs PIL.
-- **Cosine fails on texts as well:** compare `details.compute_units` and s4's `CPU_AND_NE` numbers; s5 runs the same
-  package on the same units, so a gap there points at the Swift runtime (inputs, function choice), not the model.
+- **`details.cosine` (vs s0) is low only on JPEG images while PNG is fine:** expected, and not gated (ADR-0008). ImageIO
+  and PIL decode JPEGs slightly differently, and EmbeddingGemma 2 itself, FP32 included, is very sensitive on some
+  images (the heavily blurred fixtures move to 0.86 with ±1/255 noise). `details.decoder` shows the same drop with no
+  Swift and no compression involved. Before ADR-0008 this failed the stage at 0.9712 (i165, budget 280).
+- **`min_cosine_runtime` fails:** the Swift call path disagrees with Python Core ML on identical inputs. That is a real
+  bug in the Swift runtime (function choice, input type or layout, padding, compute units, truncation or
+  normalization), not precision. `details.runtime.by_group` shows whether it is text, one budget or one format.
+- **A task-level gate fails while `min_cosine_runtime` passes:** the model, not the port. Compare with s4's
+  numbers. s5's are against the FP reference on Swift's pixels, so they differ from s4's only by the decoder's effect
+  on quantization error.
+- **`PixelDumpError`:** a PNG in `artifacts/s5_swift/pixels/` is missing or not byte-identical to the image Swift
+  hashed. egcm-parity must run with `--pixels`. Stale files from an older run are caught by the sha256 check.
+- **`fp_reference <budget>: computed N images, M differ from s0`:** the FP step and the parent disagree on which images
+  need the FP32 rewrite. That is a bug in `fp_reference.needed` or `run.fp_needed`.

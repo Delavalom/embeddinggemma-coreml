@@ -1,6 +1,9 @@
 # ADR-0004: The s5 pixel gate is measured on decode-identical inputs
 
-**Status:** accepted, 2026-10-23 (`gates.toml` is unchanged; the gate's input set is what changed)
+**Status:** accepted, 2026-10-23 (`gates.toml` is unchanged; the gate's input set is what changed). The end-to-end
+clause (last bullet of "Decision", and "the fix would be a different decoder" in "Consequences") is amended by
+ADR-0008, 2026-10-25: the FP model itself moves with the decoder, so s5 now compares against references on Swift's
+own pixels and records the decoder's effect.
 
 ## Context
 
