@@ -180,19 +180,21 @@ def test_fill_rejects_another_models_result(tmp_path, monkeypatch):
     monkeypatch.setattr(s6.published, "tokenizer_source", lambda: tok)
     monkeypatch.setattr(s6.Devicectl, "list_devices", lambda self: [phone])
     monkeypatch.setattr(s6, "build_app", lambda d, out: tmp_path / "A.app")
-    monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: result() | {"model_revision": "file-other"})
+    other = {"70": "file-other", "280": "file-other"}
+    monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: result() | {"model_revisions": other})
     fill = s6.make_fill(s6.argparse.Namespace(package=str(pkg), device=None))
-    with pytest.raises(RuntimeError, match="expected 'file-"):
+    with pytest.raises(RuntimeError, match="expected \\{'70': 'file-"):
         fill(Report(stage="s6_device"))
 
     entries = json.loads((tmp_path / "Model" / "files.json").read_text())
     expected = published.sha256_file(tmp_path / "Model" / "files.json")
-    ours = result() | {"model_revision": "file-" + expected[:16]}
-    stale_compile = ours | {"compile": result()["compile"] | {"model_revision": "file-other"}}
+    revisions = {"70": "file-" + expected[:16], "280": "file-" + expected[:16]}  # --package: one flat layout
+    ours = result() | {"model_revisions": revisions}
+    stale_compile = ours | {"compile": result()["compile"] | {"model_revisions": other}}
     monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: stale_compile)
-    with pytest.raises(RuntimeError, match="the compile ran model 'file-other'"):
+    with pytest.raises(RuntimeError, match="the compile ran models \\{'70': 'file-other'"):
         fill(Report(stage="s6_device"))
-    ours["compile"]["model_revision"] = ours["model_revision"]
+    ours["compile"]["model_revisions"] = revisions
     cold_bench = ours | {"budgets": result(load_ms=60_000.0)["budgets"]}
     monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: cold_bench)
     with pytest.raises(RuntimeError, match="compiled 70/embed_image_70_square"):
@@ -200,7 +202,8 @@ def test_fill_rejects_another_models_result(tmp_path, monkeypatch):
     monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: ours)
     r = Report(stage="s6_device")
     fill(r)
-    assert r.metrics["min_devices"] == 1 and r.details["files_json_sha256"] == expected
+    assert r.metrics["min_devices"] == 1 and r.details["files_json_sha256"] == {"all": expected}
+    assert r.details["expected_revisions"] == revisions
     assert (tmp_path / "out" / "devices" / "iPhone14,3.json").is_file()
     assert [e["path"] for e in entries] == ["EmbeddingGemma2.mlpackage/Manifest.json", "tokenizer/tokenizer.json",
                                         "tokenizer/tokenizer_config.json"]

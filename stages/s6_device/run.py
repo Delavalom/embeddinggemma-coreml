@@ -21,6 +21,7 @@ import uuid
 from pathlib import Path
 
 from egcm import manifest, published
+from egcm.buckets import BUDGETS
 from egcm.gates import targets
 from egcm.paths import ROOT, stage_dir
 from egcm.report import Report
@@ -38,7 +39,8 @@ from stages.s6_device.team import ensure_team_xcconfig
 
 STAGE = "s6_device"
 DEMO = ROOT / "Examples" / "PhotoSearchDemo"
-# The published folder (egcm.published) the app bundles as its `Model` resource. Gitignored; written by this stage.
+# The published folders (egcm.published) the app bundles as its `Model` resource: Model/b70/ and Model/b280/
+# (ADR-0010). Gitignored; written by this stage.
 MODEL_DIR = DEMO / "Model"
 # A function load in the benchmark slower than this was a compile, not a warm load (ADR-0009). Measured on the
 # iPhone 13 Pro Max: cold compiles 45-240 s per function, warm loads of the whole 14-function package 6.5-7 s.
@@ -76,8 +78,10 @@ def build_app(device: Device, out: Path) -> Path:
     shutil.rmtree(app, ignore_errors=True)
     log(f"building PhotoSearchDemo for {device.marketing_name} (log: {out / 'xcodebuild.log'})")
     _check(build_command(device.udid, derived), DEMO, out / "xcodebuild.log")
-    if not (app / "Model" / published.FILES_JSON).is_file():
-        raise RuntimeError(f"{app} has no Model/{published.FILES_JSON}; the bundling script did not run")
+    for rel in bundled_layouts():
+        if not (app / "Model" / rel / published.FILES_JSON).is_file():
+            raise RuntimeError(f"{app} has no {Path('Model', rel, published.FILES_JSON)}; the bundling script did "
+                               "not run")
     _check(["codesign", "--verify", "--deep", "--strict", str(app)], DEMO, out / "codesign.log")
     return app
 
@@ -145,26 +149,53 @@ def summarize(results: list[dict], target_ms_70: float) -> tuple[dict, dict]:
     return metrics, details
 
 
+def bundled_layouts() -> list[str]:
+    """The published layouts under MODEL_DIR, relative to it: `b70`, `b280` (ADR-0010), or `.` (one flat layout)."""
+    return sorted(p.parent.relative_to(MODEL_DIR).as_posix() for p in MODEL_DIR.glob("**/" + published.FILES_JSON))
+
+
+def bundle(args: argparse.Namespace, out: Path) -> tuple[dict[str, str], dict]:
+    """Writes MODEL_DIR (replacing it) and returns (budget -> the `modelRevision` the app must report, details).
+
+    Default: one layout per budget, `Model/b70/` and `Model/b280/`, from s4's device archives, unpacked
+    (sha256-checked): the bytes each phone downloads. The app's `.file(Model)` source picks `Model/b<budget>/`, so
+    each budget reports `file-<sha256 prefix of its own files.json>`. `--package`: that one package (all 14
+    functions), flat in `Model/`, for both budgets."""
+    shutil.rmtree(MODEL_DIR, ignore_errors=True)
+    if args.package is not None:
+        sha = published.assemble(Path(args.package), published.tokenizer_source(), MODEL_DIR)
+        log(f"bundling {args.package} as {MODEL_DIR} (files.json {sha[:16]})")
+        return ({str(b): "file-" + sha[:16] for b in BUDGETS},
+                {"package": str(args.package), "s4_recipe": None, "files_json_sha256": {"all": sha}})
+    s4 = published.shipped()
+    shas, packages = {}, {}
+    for b, v in sorted(s4.budgets.items()):
+        unpacked = manifest.unpack(v.archive, out / "unpacked" / published.budget_dir(b), v.archive_sha256)
+        tokenizer = published.check_tokenizer(unpacked / published.TOKENIZER_DIR)
+        packages[str(b)] = str(unpacked / published.PACKAGE_NAME)
+        shas[str(b)] = published.assemble(unpacked / published.PACKAGE_NAME, tokenizer,
+                                          MODEL_DIR / published.budget_dir(b))
+        log(f"bundling {v.archive.name} as {MODEL_DIR / published.budget_dir(b)} (files.json {shas[str(b)][:16]})")
+    return ({b: "file-" + sha[:16] for b, sha in shas.items()},
+            {"package": packages, "s4_recipe": s4.recipe, "files_json_sha256": shas})
+
+
+def check_revisions(result: dict, expected: dict[str, str]) -> None:
+    """Both launches must report, per budget, the model this run bundled (`model_revisions`: budget -> revision)."""
+    for run, revisions in (("benchmark", result.get("model_revisions")),
+                           ("compile", result.get("compile", {}).get("model_revisions"))):
+        if revisions != expected:
+            raise RuntimeError(f"the {run} ran models {revisions!r}, expected {expected!r}")
+
+
 def make_fill(args: argparse.Namespace):
     def fill(report: Report) -> None:
         out = stage_dir(STAGE)
-        if args.package is None:  # s4's device archive, unpacked (sha256-checked): the bytes a phone downloads
-            s4 = published.shipped()
-            unpacked = manifest.unpack(s4.archive, out / "unpacked", s4.archive_sha256)
-            package, recipe = unpacked / published.PACKAGE_NAME, s4.recipe
-            tokenizer = published.check_tokenizer(unpacked / published.TOKENIZER_DIR)
-        else:
-            package, recipe, tokenizer = Path(args.package), None, published.tokenizer_source()
-        files_sha = published.assemble(package, tokenizer, MODEL_DIR)
-        expected_revision = "file-" + files_sha[:16]  # EmbeddingGemma.modelRevision for a .file source
-        log(f"bundling {package} as {MODEL_DIR} (files.json {files_sha[:16]})")
+        expected, bundled = bundle(args, out)
         ctl = Devicectl()
         device = pick_device(ctl.list_devices(), args.device)
         result = benchmark(device, build_app(device, out), out, ctl)
-        for run, revision in (("benchmark", result.get("model_revision")),
-                              ("compile", result.get("compile", {}).get("model_revision"))):
-            if revision != expected_revision:
-                raise RuntimeError(f"the {run} ran model {revision!r}, expected {expected_revision!r}")
+        check_revisions(result, expected)
         if cold := cold_loads(result):
             raise RuntimeError(f"the benchmark compiled {', '.join(cold)} (over {MAX_WARM_LOAD_MS} ms) after the "
                                "compile run; its peak is not a warm peak")
@@ -172,15 +203,15 @@ def make_fill(args: argparse.Namespace):
         (out / "devices" / f"{device.product_type}.json").write_text(json.dumps(result, indent=1) + "\n")
         metrics, details = summarize([result], targets(STAGE)["target_ms_per_image_70"])
         report.metrics.update(metrics)
-        report.details.update(details, package=str(package), s4_recipe=recipe, files_json_sha256=files_sha,
-                              bundle_id=BUNDLE_ID)
+        report.details.update(details, **bundled, expected_revisions=expected, bundle_id=BUNDLE_ID)
     return fill
 
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--device", help="UDID or CoreDevice identifier (default: the first physical iPhone)")
-    p.add_argument("--package", help="the .mlpackage to bundle (default: the one s4's report says it shipped)")
+    p.add_argument("--package", help="one 14-function .mlpackage to bundle flat in Model/ for both budgets (default: "
+                                     "s4's two budget packages, Model/b70/ and Model/b280/)")
     run_stage(STAGE, make_fill(p.parse_args(argv)))
 
 

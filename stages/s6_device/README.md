@@ -25,18 +25,23 @@ Needs fresh passing s4 and s5. To choose a device:
 
 The model is not on Hugging Face yet (that is s7), so this stage bundles it:
 
-1. `egcm.published.assemble` writes the published layout to `Examples/PhotoSearchDemo/Model/` (gitignored):
-   `EmbeddingGemma2.mlpackage/` and `tokenizer/` from s4's device archive (sha256-checked, unpacked into
-   `artifacts/s6_device/unpacked/`, recipe recorded as `details.s4_recipe`; `--package <path>` bundles another
-   package with the local tokenizer and records null), and `files.json`.
+1. `egcm.published.assemble` writes one published layout per image budget (ADR-0010) to
+   `Examples/PhotoSearchDemo/Model/b70/` and `Model/b280/` (gitignored; `Model/` is replaced first): each budget's
+   `EmbeddingGemma2.mlpackage/` and `tokenizer/` from its s4 device archive (sha256-checked, unpacked into
+   `artifacts/s6_device/unpacked/b<budget>/`), and its own `files.json`. Recorded: `details.s4_recipe`,
+   `details.package` and `details.files_json_sha256` per budget. `--package <path>` bundles one 14-function package
+   flat in `Model/` (with the local tokenizer) for both budgets and records the recipe as null.
 2. A build script in `project.yml` copies `Model/` into the app bundle when it exists.
-3. The app loads it with `EmbeddingGemma.load(.file(bundleURL))`, which verifies every file against `files.json`,
-   copies it to Application Support and compiles it once. The app reports `model_revision` =
-   `file-<first 16 hex of sha256(files.json)>`, and the stage fails if that is not the model it just bundled.
+3. The app loads each budget with `EmbeddingGemma.load(.file(bundleURL))`, which uses `Model/b<budget>/` (or `Model/`
+   itself for a flat layout), verifies every file against that `files.json`, copies it to Application Support and
+   compiles it once. Both launches report `model_revisions` = `{"70": ..., "280": ...}`, each
+   `file-<first 16 hex of sha256(b<budget>/files.json)>` (`details.expected_revisions`), and the stage fails if
+   either launch reports another model for either budget.
 
 Without `Model/` the app falls back to the published default (`EmbeddingGemma.defaultRevision`), which fails until
-s7 has run. The bundled app is about the size of the uncompressed package (the s4 report's
-`details.variants.<recipe>.package_mb`; `int8_table4` zips to about 350 MB).
+s7 has run. The bundled app holds both budget packages uncompressed (the s4 report's
+`details.budgets.<budget>.package_mb`), so it is about twice the size of one; a phone that downloads the model gets
+only its budget's.
 
 ## What it does
 
@@ -50,8 +55,8 @@ s7 has run. The bundled app is about the size of the uncompressed package (the s
 4. `devicectl device install app` (installing a new build discards the on-device compiles), then two launches,
    each `devicectl device process launch --console --terminate-existing <bundle> -- <mode> -runID <uuid>` (console
    in `artifacts/s6_device/console_<model><mode>.log`):
-   - `-compile` (`CompileRunner.swift`): installs the model and loads every function the benchmark uses, one at a
-     time, releasing each. Writes `Documents/s6_compile.json`: peak, load time per function, thermal state, and
+   - `-compile` (`CompileRunner.swift`): installs both budgets' models and loads every function of each package, one
+     at a time, releasing each (the text functions twice, once per package). Writes `Documents/s6_compile.json`: peak, load time per function, thermal state, and
      `os_proc_available_memory()` at launch.
    - `-benchmark` (`BenchmarkRunner.swift`, below). Writes `Documents/s6_device.json`.
 5. For each launch, polls `devicectl device copy from --domain-type appDataContainer --source <file>` every 15 s
@@ -78,7 +83,8 @@ repo-relative paths and no home folder) and commit it.
 - **"Photos access was denied"**: allow it in Settings > Privacy > Photos > Photo Search, rerun.
 - **xcodebuild signing errors**: delete `Team.xcconfig` and rerun (rewritten from `asc`), or open the project in
   Xcode once so it registers the device. `asc auth status --validate` must pass.
-- **"the app ran model file-..., expected file-..."**: the app loaded an older install. Delete the app from the
-  phone and rerun.
+- **"the benchmark ran models {...}, expected {...}"** (or "the compile ran"): the app loaded an older install for
+  that budget, or an app build that does not report `model_revisions` yet (None). Delete the app from the phone and
+  rerun.
 - **Few images measured**: the library has fewer than 1,000 photos, or iCloud photos could not be downloaded
   (`skipped` per budget).
