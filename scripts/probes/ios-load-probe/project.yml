@@ -1,0 +1,23 @@
+name: Probe
+options:
+  deploymentTarget:
+    iOS: "18.0"
+configFiles:
+  Debug: Base.xcconfig
+  Release: Base.xcconfig
+targets:
+  Probe:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.delavalom.egcm.demo
+        PRODUCT_NAME: PhotoSearchDemo
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

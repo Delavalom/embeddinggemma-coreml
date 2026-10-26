@@ -1,0 +1,2 @@
+// Copy Examples/PhotoSearchDemo/Team.xcconfig here (gitignored) to sign.
+#include? "Team.xcconfig"
