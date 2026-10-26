@@ -1,5 +1,8 @@
-"""`manifest.json`: the device download's manifest at the published repo root (s7), and unpacking the archive
-(s5 and s6 test exactly the bytes s4 gated).
+"""`manifest.json`: one image budget's device download in the published repo (s7), and unpacking an archive (s5 and
+s6 test exactly the bytes s4 gated).
+
+Published layout (ADR-0010): one folder per image budget, `b70/` and `b280/`, each holding `manifest.json`, the
+archive it names, and the plain layout of egcm.published (`files.json`, `EmbeddingGemma2.mlpackage/`, `tokenizer/`).
 
 Shared contract (the Swift `ArchiveManifest`, and Roll): a JSON object, unknown keys ignored,
 
@@ -8,10 +11,16 @@ Shared contract (the Swift `ArchiveManifest`, and Roll): a JSON object, unknown 
      "size": <archive bytes>, "sha256": "<64 lowercase hex of the archive>",
      "unpacked_size": <bytes after extraction, optional>,
      "revision": "<label, optional, e.g. v1.0.0>",
-     "functions": [optional; if present it contains every REQUIRED_FUNCTIONS name]}
+     "image_budget": <70 or 280, optional>,
+     "functions": [optional; see below]}
+
+`functions`, if present, contains every `required_functions(image_budget)` name: the four text functions and the five
+image functions of `image_budget`, and none of the other budget's. Without `image_budget` (a 14-function package,
+e.g. a manifest from before ADR-0010) it contains all 14.
 
 The archive (egcm.archive.device_archive) holds exactly EmbeddingGemma2.mlpackage/** and
-tokenizer/{tokenizer.json,tokenizer_config.json}: LZFSE, no symlinks, no absolute or ".." paths.
+tokenizer/{tokenizer.json,tokenizer_config.json}: LZFSE, no symlinks, no absolute or ".." paths. The package inside
+is named EmbeddingGemma2.mlpackage whichever budget it holds.
 """
 
 from __future__ import annotations
@@ -23,22 +32,36 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from egcm.buckets import BUCKETS
-from egcm.published import PACKAGE_NAME, TOKENIZER_DIR, TOKENIZER_FILES, Shipped, sha256_file
+from egcm.buckets import BUCKETS, BUDGETS
+from egcm.published import PACKAGE_NAME, TOKENIZER_DIR, TOKENIZER_FILES, Variant, budget_dir, sha256_file
 
 MANIFEST_JSON = "manifest.json"
 ARCHIVE_NAME = "EmbeddingGemma2.aar"
 FORMAT = 1
 AA = "/usr/bin/aa"
-# The functions every consumer needs (the Swift package and Roll check them); the package's own names must match.
-REQUIRED_FUNCTIONS = tuple(f"embed_text_{n}" for n in (16, 32, 64, 128)) + tuple(b.function_name for b in BUCKETS)
+TEXT_FUNCTIONS = tuple(f"embed_text_{n}" for n in (16, 32, 64, 128))
 
 
-def check_functions(functions) -> list[str]:
-    """The package's function names, sorted; raises unless they include every REQUIRED_FUNCTIONS name."""
+def required_functions(budget: int | None = None) -> tuple[str, ...]:
+    """The functions a consumer needs: the text functions and the image functions of `budget` (all 14 without one).
+    The package's own names must match (the Swift package and Roll check them)."""
+    if budget is not None and budget not in BUDGETS:
+        raise ValueError(f"image budget must be one of {BUDGETS}, got {budget!r}")
+    return TEXT_FUNCTIONS + tuple(b.function_name for b in BUCKETS if budget is None or b.budget == budget)
+
+
+REQUIRED_FUNCTIONS = required_functions()
+
+
+def check_functions(functions, budget: int | None = None) -> list[str]:
+    """The package's function names, sorted; raises unless they include every `required_functions(budget)` name and,
+    with a budget, no image function of another budget."""
     names = sorted(set(functions))
-    if missing := [f for f in REQUIRED_FUNCTIONS if f not in names]:
+    if missing := [f for f in required_functions(budget) if f not in names]:
         raise ValueError(f"the package lacks the functions consumers need: {missing} (it has {names})")
+    others = {b.function_name for b in BUCKETS if budget is not None and b.budget != budget}
+    if extra := [f for f in names if f in others]:
+        raise ValueError(f"the budget {budget} package holds another budget's image functions: {extra}")
     return names
 
 
@@ -75,23 +98,24 @@ def unpack(archive: Path, dest: Path, sha256: str | None = None) -> Path:
     return dest
 
 
-def write(s4: Shipped, out: Path, revision: str | None = None) -> str:
-    """Copies s4's archive (the gated bytes, sha256-checked) to out/EmbeddingGemma2.aar and writes out/manifest.json;
-    returns the sha256 of manifest.json (what `defaultManifestSHA256` pins). The archive is unpacked once into a
-    temporary folder to check the layout and measure `unpacked_size`."""
-    out = Path(out)
-    names = check_functions(s4.functions)
+def write(v: Variant, root: Path, revision: str | None = None) -> str:
+    """Copies one budget's s4 archive (the gated bytes, sha256-checked) to root/b<budget>/EmbeddingGemma2.aar and
+    writes root/b<budget>/manifest.json with its `image_budget`; returns the sha256 of that manifest.json (the
+    budget's `defaultManifestSHA256` pin). The archive is unpacked once into a temporary folder to check the layout and
+    measure `unpacked_size`."""
+    out = Path(root) / budget_dir(v.budget)
+    names = check_functions(v.functions, v.budget)
     out.mkdir(parents=True, exist_ok=True)
     aar = out / ARCHIVE_NAME
-    if subprocess.run(["cp", "-c", str(s4.archive), str(aar)], capture_output=True).returncode != 0:
-        shutil.copyfile(s4.archive, aar)
+    if subprocess.run(["cp", "-c", str(v.archive), str(aar)], capture_output=True).returncode != 0:
+        shutil.copyfile(v.archive, aar)
     sha = sha256_file(aar)
-    if sha != s4.archive_sha256:
-        raise ValueError(f"{s4.archive} does not match s4's checksums.json; rerun `just stage 4`")
+    if sha != v.archive_sha256:
+        raise ValueError(f"{v.archive} does not match s4's checksums.json; rerun `just stage 4`")
     with tempfile.TemporaryDirectory(dir=out.parent, prefix=".unpack-") as tmp:
         unpacked = check_layout(unpack(aar, Path(tmp) / "x"), aar.name)
     manifest = {"format": FORMAT, "archive": aar.name, "size": aar.stat().st_size, "sha256": sha,
-                "unpacked_size": unpacked, "functions": names}
+                "unpacked_size": unpacked, "image_budget": v.budget, "functions": names}
     if revision:
         manifest["revision"] = revision
     data = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()

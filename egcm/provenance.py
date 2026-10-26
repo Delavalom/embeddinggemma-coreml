@@ -57,7 +57,8 @@ STAGE_CODE: dict[str, tuple[str, ...]] = {
     "s3_coreml_ane": ("stages/s3_coreml_ane", *_BUILD, "egcm/placement.py", "egcm/probe.py", "egcm/e5cache.py",
                       "egcm/ranking.py", *_REWRITE, *_COMPARE, *_LOCK),
     "s4_compress": ("stages/s4_compress", "egcm/compress.py", *_BUILD, "egcm/placement.py", "egcm/e5cache.py",
-                    "egcm/e5prune.py", "egcm/ranking.py", "egcm/archive.py", *_REWRITE, *_COMPARE, *_LOCK),
+                    "egcm/e5prune.py", "egcm/ranking.py", "egcm/archive.py", "egcm/manifest.py", "egcm/published.py",
+                    *_REWRITE, *_COMPARE, *_LOCK),  # manifest.py: the functions of each budget package (ADR-0010)
     # s5-s7 take s4's package and device archive through egcm/published.py and egcm/manifest.py. s5 also runs it with
     # coremltools (runtime parity) and the s1 rewrite on Swift's pixels (FP reference), and s4's ranking (ADR-0008).
     "s5_swift": ("stages/s5_swift", "swift", "egcm/published.py", "egcm/manifest.py", "egcm/convert.py",

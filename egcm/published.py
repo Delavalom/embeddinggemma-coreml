@@ -1,14 +1,15 @@
-"""The published model folder, and what s4 shipped.
+"""The published model folders, and what s4 shipped.
 
-The app downloads `manifest.json` + `EmbeddingGemma2.aar` (egcm.manifest). The plain layout (`assemble`) is what s6
-bundles in the demo app and what Python users download:
+s4 ships one package per image budget (ADR-0010), each in its own folder `b70/` and `b280/` (`budget_dir`). In each,
+the app downloads `manifest.json` + `EmbeddingGemma2.aar` (egcm.manifest). The plain layout (`assemble`, one call per
+budget folder) is what s6 bundles in the demo app and what Python users download:
 
     files.json                               every file below, with size and sha256 (FilesManifest in Swift)
-    EmbeddingGemma2.mlpackage/**             the s4 package, uncompressed
+    EmbeddingGemma2.mlpackage/**             the budget's s4 package, uncompressed (always this name)
     tokenizer/tokenizer.json                 from google/embeddinggemma-2 at HF_REVISION
     tokenizer/tokenizer_config.json
 
-s6 builds it into the demo app's bundle; s7 uploads it. Which s4 package that is comes from s4's report
+s6 builds both into the demo app's bundle; s7 uploads them. Which s4 packages those are comes from s4's report
 (`shipped`), never from a recipe name written here. `files.json` matches
 swift/Sources/EmbeddingGemma/Checksums.swift: a JSON array of {path, size, sha256}, sorted by path, covering
 every regular file except `files.json` itself and hidden files (any path component starting with ".").
@@ -20,9 +21,10 @@ import hashlib
 import json
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from egcm.buckets import BUDGETS
 from egcm.paths import ARTIFACTS, HF_REPO, HF_REVISION
 from egcm.report import read_report
 
@@ -39,44 +41,68 @@ TOKENIZER_FILES = {
 S4_STAGE = "s4_compress"
 
 
+def budget_dir(budget: int) -> str:
+    """The published folder of one image budget (ADR-0010): `b70`, `b280`."""
+    return f"b{budget}"
+
+
+@dataclass(frozen=True)
+class Variant:
+    """One image budget's package and device archive, as s4's report records it (`details.budgets.<budget>`)."""
+
+    budget: int
+    package: Path  # artifacts/s4_compress/<package>: the text functions + this budget's image functions
+    archive: Path  # artifacts/s4_compress/<device_archive>: the gated device download (egcm.archive)
+    archive_sha256: str  # checksums.json "archive"
+    functions: tuple[str, ...]  # the package's function names, sorted
+    download_mb: float | None = None  # the archive's size (s4's max_download_mb is the larger of the two)
+
+
 @dataclass(frozen=True)
 class Shipped:
     """What s4 ships, as its report records it."""
 
-    package: Path  # artifacts/s4_compress/<details.package>
-    archive: Path  # artifacts/s4_compress/<details.device_archive>: the gated device download (egcm.archive)
-    archive_sha256: str  # checksums.json "archive"
+    package: Path  # artifacts/s4_compress/<details.package>: the 14-function package s4 evaluated and gated
     recipe: str  # details.winner: the first egcm.compress.RECIPES entry that passed every s4 gate (ADR-0007)
-    download_mb: float | None  # the archive (metric max_download_mb)
+    download_mb: float | None  # metric max_download_mb: the larger budget archive (what any one phone downloads)
     max_download_mb: float | None  # the gate it was checked against (gates.toml [s4_compress], as recorded)
-    functions: tuple[str, ...] = ()  # the package's function names (details.build.packages[recipe].functions)
+    functions: tuple[str, ...] = ()  # the 14-function package's names (details.build.packages[recipe].functions)
+    budgets: dict[int, Variant] = field(default_factory=dict)  # image budget -> what ships for it (ADR-0010)
 
 
 def shipped(root: Path | None = None) -> Shipped:
-    """The package s4 shipped, read from artifacts/s4_compress/report.json.
+    """What s4 shipped, read from artifacts/s4_compress/report.json.
 
-    s4 renames its winning recipe to `details.package` and its device archive to `details.device_archive`, with the
-    archive's sha256 in checksums.json. A failed s4 still leaves its closest variant there, so a report without
-    `details.winner` is refused rather than trusted."""
+    s4 renames its winning recipe to `details.package` and splits it into one package and device archive per image
+    budget (`details.budgets`), with the archives' sha256 in checksums.json. A failed s4 still leaves its closest
+    variant there, so a report without `details.winner` is refused rather than trusted."""
     artifacts = ARTIFACTS if root is None else Path(root) / "artifacts"
     path = artifacts / S4_STAGE / "report.json"
     if not path.is_file():
         raise FileNotFoundError(f"{path} does not exist; run `just stage 4`")
     r = read_report(path)
-    winner, name, aar = r.details.get("winner"), r.details.get("package"), r.details.get("device_archive")
+    winner, name, budgets = r.details.get("winner"), r.details.get("package"), r.details.get("budgets") or {}
     if not winner or not name:
         raise RuntimeError(f"s4 shipped nothing (status {r.status!r}, winner {winner!r}); rerun `just stage 4`")
-    if not aar:
-        raise RuntimeError("the s4 report names no device_archive (made before egcm.archive); rerun `just stage 4`")
+    if missing := [b for b in BUDGETS if str(b) not in budgets]:
+        raise RuntimeError(f"the s4 report has no package for image budget(s) {missing} (made before ADR-0010); "
+                           "rerun `just stage 4`")
     d = artifacts / S4_STAGE
-    try:
-        sha = json.loads((d / "checksums.json").read_text())["archive"][aar]
-    except (OSError, ValueError, KeyError) as e:
-        raise RuntimeError(f"{d / 'checksums.json'} has no archive sha256 for {aar} ({e!r}); rerun `just stage 4`")
+    variants = {}
+    for b in BUDGETS:
+        e = budgets[str(b)]
+        try:
+            sha = json.loads((d / "checksums.json").read_text())["archive"][e["device_archive"]]
+        except (OSError, ValueError, KeyError) as ex:
+            raise RuntimeError(f"{d / 'checksums.json'} has no archive sha256 for {e.get('device_archive')} "
+                               f"({ex!r}); rerun `just stage 4`")
+        variants[b] = Variant(budget=b, package=d / e["package"], archive=d / e["device_archive"],
+                              archive_sha256=sha, functions=tuple(sorted(e.get("functions") or ())),
+                              download_mb=e.get("download_mb"))
     functions = (r.details.get("build", {}).get("packages", {}).get(winner) or {}).get("functions") or ()
-    return Shipped(package=d / name, archive=d / aar, archive_sha256=sha, recipe=winner,
-                   download_mb=r.metrics.get("max_download_mb"), max_download_mb=r.gate_values.get("max_download_mb"),
-                   functions=tuple(sorted(functions)))
+    return Shipped(package=d / name, recipe=winner, download_mb=r.metrics.get("max_download_mb"),
+                   max_download_mb=r.gate_values.get("max_download_mb"), functions=tuple(sorted(functions)),
+                   budgets=variants)
 
 
 def sha256_file(p: Path) -> str:
