@@ -33,12 +33,14 @@ let query = try await model.embed(query: "a dog on the beach")
 let score = zip(image, query).reduce(0) { $0 + $1.0 * $1.1 }  // vectors are normalized: dot = cosine
 ```
 
-The first `load` downloads one file, `EmbeddingGemma2.aar` (an LZFSE Apple Archive of the model package and the
-tokenizer), checks its size and SHA-256 against `manifest.json`, unpacks it and compiles the model once. Its size
-is measured by s4 and gated against `max_download_mb` in [`gates.toml`](gates.toml); the measured number is in the
-model card and [`docs/RESULTS.md`](docs/RESULTS.md). An app that downloads and unpacks the archive itself can hand
-the folder over with `.installed(folder, revision:)`, which moves it in place and needs space only for the compiled
-model.
+The model is published as one package per image budget (ADR-0010), and a phone gets only its own: the first `load`
+resolves the budget (`.auto`: 280 on A17 Pro and newer and on Macs, 70 otherwise) and downloads one file,
+`b<budget>/EmbeddingGemma2.aar` (an LZFSE Apple Archive of that budget's model package and the tokenizer), checks
+its size and SHA-256 against `b<budget>/manifest.json`, unpacks it and compiles the model once. The larger of the
+two archives is measured by s4 and gated against `max_download_mb` in [`gates.toml`](gates.toml); the measured
+number is in the model card and [`docs/RESULTS.md`](docs/RESULTS.md). An app that downloads and unpacks the
+archive itself can hand the folder over with `.installed(folder, revision:)`, which moves it in place and needs
+space only for the compiled model.
 
 ## What is in the model
 

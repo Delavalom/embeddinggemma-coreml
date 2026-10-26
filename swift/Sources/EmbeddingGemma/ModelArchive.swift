@@ -2,7 +2,8 @@ import AppleArchive
 import Foundation
 import System
 
-/// `manifest.json` at the root of the published Hugging Face repo: the one archive an app downloads.
+/// `manifest.json` in each budget folder (`b70/`, `b280/`) of the published Hugging Face repo: the one archive an app
+/// downloads for that budget.
 ///
 /// ```json
 /// {"format": 1, "archive": "EmbeddingGemma2.aar", "size": 367001600, "sha256": "<64 lowercase hex>",

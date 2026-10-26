@@ -7,10 +7,12 @@ ML conversion of `google/embeddinggemma-2` on the Neural Engine.
 
 Two libraries:
 
-- **`EmbeddingGemma`** downloads the model from Hugging Face at a pinned commit: `manifest.json`, then the one
-  archive it names, `EmbeddingGemma2.aar` (LZFSE Apple Archive), checked against its size and SHA-256 and unpacked
-  with the AppleArchive framework. It compiles the model once, tokenizes text, preprocesses images exactly as the reference
-  processor does, and returns normalized vectors.
+- **`EmbeddingGemma`** downloads the model from Hugging Face at a pinned commit. The model is published as one
+  package per image budget (ADR-0010: `b70/` and `b280/`, each the four text functions plus that budget's five
+  image functions), and `load` fetches only the one for the budget it resolves: `b<budget>/manifest.json`, then
+  the one archive it names, `b<budget>/EmbeddingGemma2.aar` (LZFSE Apple Archive), checked against its size and
+  SHA-256 and unpacked with the AppleArchive framework. It compiles the model once, tokenizes text, preprocesses
+  images exactly as the reference processor does, and returns normalized vectors.
 - **`EmbeddingIndex`** is a flat, exact nearest-neighbour index on disk (dot-product scores, FP16 storage), tied to
   the model revision so vectors from different models are never mixed.
 
@@ -18,9 +20,10 @@ Two libraries:
 
 - iOS 18+ or macOS 15+ (the model uses `ios18` Core ML ops). The package uses Swift tools 6.0 (Xcode 16 or later).
 - A device with a Neural Engine is recommended. Intel Macs run the model on the CPU/GPU, which is slower.
-- One download on first use, `EmbeddingGemma2.aar` (the model package and the tokenizer). Its size is gated by s4
-  (`max_download_mb` in `gates.toml`); the measured size is in the model card and `docs/RESULTS.md`, and
-  `manifest.json` has the exact `size` and `unpacked_size`. While it installs it needs free space for the archive,
+- One download on first use, `b<budget>/EmbeddingGemma2.aar` (that budget's model package and the tokenizer). s4
+  gates the larger of the two (`max_download_mb` in `gates.toml`); the measured sizes are in the model card and
+  `docs/RESULTS.md`, and each `manifest.json` has the exact `size` and `unpacked_size`. A device that loads both
+  budgets (possible only with an explicit `budget:`) downloads and installs both packages. While it installs it needs free space for the archive,
   the unpacked files and the compiled model; afterwards the compiled model and the tokenizer stay in Application
   Support. Resumable: an interrupted download continues where it stopped.
 - Dependency: [`swift-transformers`](https://github.com/huggingface/swift-transformers) (`Tokenizers`), from
@@ -44,8 +47,9 @@ targets: [
 ```
 
 Each package release pins one model: `EmbeddingGemma.defaultRepo`, `defaultRevision` (the Hugging Face commit),
-and `defaultManifestSHA256` (the SHA-256 of `manifest.json`, which pins the archive's size and SHA-256). The release
-process writes all three and prints them on one `PUBLISHED_MODEL {"repo", "revision", "manifest_sha256"}` line.
+and `defaultManifestSHA256`, one SHA-256 per image budget (`[70: ..., 280: ...]`, of `b<budget>/manifest.json`,
+which pins that archive's size and SHA-256). The release process (s7) writes them and prints them on one
+`PUBLISHED_MODEL` line.
 
 ## Example: search photos by text
 
@@ -78,14 +82,24 @@ for hit in index.search(query, k: 10) { print(hit.id, hit.score) }
   `.classification` or `.clustering`. Texts are cut at 128 tokens.
 - `embed(image:orientation:)` takes a `CGImage` plus its EXIF orientation. Photos often need it.
 - Calls can run concurrently. `unloadFunctions()` frees the loaded functions, for example on a memory warning.
+- `model.modelRevision` is the Hugging Face commit for both budgets; store it with `model.imageBudget` (vectors
+  from the two budgets' packages are different models).
 - `.file(URL)` loads a local folder with the plain layout (`files.json`, `EmbeddingGemma2.mlpackage/`,
   `tokenizer/`), or with `manifest.json` + the archive, and copies it into the store (it needs free space for the
-  copy too). That is useful for bundling the model in an app; the demo app does this.
+  copy too). If the folder has a `b70/` or `b280/` subfolder, the one for the resolved budget is used (the published
+  layout, one package per budget; an archive's `manifest.json` there must declare that `image_budget`); otherwise
+  the folder itself, which must then hold a 14-function package. `modelRevision` is `file-<sha256 prefix>` of the
+  `files.json` (or `manifest.json`) of the folder used. That is useful for bundling the model in an app; the demo
+  app does this.
 - `.installed(folder, repo:, revision:)` adopts a folder your app already downloaded, verified and unpacked
-  (`EmbeddingGemma2.mlpackage/`, `tokenizer/`): it is **moved** into the store (same volume, no copy) and only the
-  package is compiled, so it needs free space for the compiled model only, about the package's size. Use the
-  published repo and commit as `repo` and `revision`, so a later `.huggingFace` load finds it installed.
-- `ModelStore().removeRevisions(except:)` deletes old model revisions after an upgrade.
+  (`EmbeddingGemma2.mlpackage/`, `tokenizer/`) for the budget it loads: it is **moved** into the store (same volume,
+  no copy) and only the package is compiled, so it needs free space for the compiled model only, about the
+  package's size. It is installed and reported as `revision`; a `.huggingFace` load installs as
+  `<commit>-b<budget>`, so the two do not share an install.
+- `ModelStore` installs a Hugging Face package as `<root>/<repo>/<commit>-b<budget>/`
+  (`ensureModel(repo:revision:budget:)`, `installed(repo:revision:budget:)`). `removeRevisions(except:)` deletes old
+  installs after an upgrade; `except` lists install folders, so keeping one budget's install of a commit does not
+  keep the other budget's (pass both to keep both). Installs a live `EmbeddingGemma` has loaded are never deleted.
 - Errors are `EmbeddingGemmaError` (a `LocalizedError`): download, checksum, storage, load, tokenizer and
   contract failures.
 
