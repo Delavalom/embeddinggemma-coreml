@@ -44,9 +44,11 @@ space only for the compiled model.
 
 ## What is in the model
 
-The model is one `.mlpackage` with 14 fixed-shape functions:
+The model has 14 fixed-shape functions, published as one `.mlpackage` per image budget (`b70/`, `b280/`), each with
+the four text functions and that budget's five image functions (s4 builds and gates all 14 together, then splits
+them and checks every function gives the same output bytes):
 
-- `embed_text_{16,32,64,128}`: text up to 128 tokens.
+- `embed_text_{16,32,64,128}`: text up to 128 tokens (in both packages).
 - `embed_image_{70,280}_{tall,portrait,square,landscape,wide}`: images at an image-token budget of 70 or 280, with
   five aspect-ratio buckets per budget.
 
@@ -65,7 +67,7 @@ gates, and an `inputs_sha256` chain over the reports it read. A report goes stal
 | s1_rewrite | a PyTorch rewrite built for Core ML, matched to s0 (min cosine >= 0.9999) |
 | s2_coreml_fp32 | Core ML FP32, matched to s0 (>= 0.9999) |
 | s3_coreml_ane | Core ML FP16 on the Neural Engine (text >= 0.995; images: min >= 0.99 and 1st percentile >= 0.995; recall@10 >= 0.95; >= 95% of ops on the Neural Engine) |
-| s4_compress | compression variants, smallest first; the first one to pass every gate ships (min cosine >= 0.99, recall@10 >= 0.95, and the device download, one LZFSE Apple Archive of the package and the tokenizer, within `max_download_mb`) |
+| s4_compress | compression variants, smallest first; the first one to pass every gate ships, split into one package per image budget (min cosine >= 0.99, recall@10 >= 0.95, and the device download, one LZFSE Apple Archive of a budget's package and the tokenizer, the larger of the two within `max_download_mb`) |
 | s5_swift | the Swift package end to end on a Mac: identical token ids, pixels within 1/255, the same vectors as Python Core ML on identical inputs (min cosine >= 0.9999), and s4's task-level gates against the FP model on the same pixels |
 | s6_device | PhotoSearchDemo's benchmark on a real iPhone (speed per image and per query, peak memory <= 800 MB) |
 | s7_publish | uploads to Hugging Face, pins the Swift package to that commit, and tags the release (guarded) |

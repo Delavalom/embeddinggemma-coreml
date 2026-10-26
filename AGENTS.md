@@ -81,10 +81,10 @@ All thresholds live in `gates.toml`. Cosine values are per fixture, and the gate
 | **s1_rewrite** | Our PyTorch rewrite, FP32, same inputs | min cosine ≥ 0.9999 (text and image). Strict weight load |
 | **s2_coreml_fp32** | Convert at FP32, run on CPU (`.cpuOnly`) | min cosine ≥ 0.9999 |
 | **s3_coreml_ane** | FP16, `.cpuAndNeuralEngine`, on this Mac's Neural Engine (M1 Pro) | text min cosine ≥ 0.995; image min cosine ≥ 0.99 and 1st percentile ≥ 0.995; recall@10 ≥ 0.95 and p5 Spearman ≥ 0.9 against the bucketed FP reference (ADR-0006); ≥ 95% of ops placed on the Neural Engine (from `MLComputePlan`) |
-| **s4_compress** | Linear weight quantization; ships `int8_table4` (int8 weights, int4 table; ADR-0007) | min cosine ≥ 0.99 (text and image combined); recall@10 ≥ 0.95 and 5th-percentile Spearman ρ of the top-50 ≥ 0.9 against the bucketed FP reference; exact-aspect top-1 in the top 10 ≥ 0.95 and image→image category precision@10 drop ≤ 0.03 (bucketing); device download (Apple Archive, LZFSE, with the tokenizer) ≤ 360 MB |
-| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors | token ids identical; pixel tensors max abs diff ≤ 1/255 (p99 on decode-identical inputs, ADR-0004); Swift vs Python Core ML on identical inputs min cosine ≥ 0.9999; s4's task-level gates (min cosine ≥ 0.99, recall@10, p5 Spearman, bucketing) against the FP reference on Swift's pixels (ADR-0008). Against s0 it is recorded only |
-| **s6_device** | PhotoSearchDemo on a real iPhone | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target (`[s6_device.targets]`), not gated |
-| **s7_publish** | HF upload, checksums, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
+| **s4_compress** | Linear weight quantization; ships `int8_table4` (int8 weights, int4 table; ADR-0007) | min cosine ≥ 0.99 (text and image combined); recall@10 ≥ 0.95 and 5th-percentile Spearman ρ of the top-50 ≥ 0.9 against the bucketed FP reference; exact-aspect top-1 in the top 10 ≥ 0.95 and image→image category precision@10 drop ≤ 0.03 (bucketing); device download (Apple Archive, LZFSE, with the tokenizer) ≤ 360 MB, the larger of the two per-budget archives: the winner is split into `EmbeddingGemma2-b70` / `-b280` (text + one budget's image functions; ADR-0010), checked identical to the 14-function package (CPU_ONLY, bitwise) |
+| **s5_swift** | Swift package on macOS: tokenizer, preprocessing, end-to-end vectors, on both per-budget device archives as a phone gets them (text from budget 70's package) | token ids identical; pixel tensors max abs diff ≤ 1/255 (p99 on decode-identical inputs, ADR-0004); Swift vs Python Core ML on identical inputs min cosine ≥ 0.9999; s4's task-level gates (min cosine ≥ 0.99, recall@10, p5 Spearman, bucketing) against the FP reference on Swift's pixels (ADR-0008). Against s0 it is recorded only |
+| **s6_device** | PhotoSearchDemo on a real iPhone, bundling `Model/b70/` and `Model/b280/` (each budget benchmarked with its own package) | records ms per image (70 and 280 budgets), ms per query, peak RSS, thermal state after 1,000 images. Gate: the report exists for ≥ 1 device; peak RSS ≤ 800 MB. Speed is recorded against the 60 ms target (`[s6_device.targets]`), not gated |
+| **s7_publish** | HF upload (`b70/` and `b280/`: archive + manifest.json + plain layout each), checksums, one manifest pin per budget, git tag `v1.0.0`, SwiftPM release, repo flipped to public | needs `--confirm` (given only after founder approval) |
 
 ## Key facts
 
@@ -128,9 +128,11 @@ egcm/                     shared Python library
   probe.py                activation max-abs probe (s3, diagnostic)
   placement.py            Neural Engine placement per function from MLComputePlan (s3, s4)
   fixtures.py             fixture loading and manifest helpers (load_texts, load_images, verify_manifest)
-  published.py            what s4 shipped (shipped(): package, device archive, recipe, functions, from its report) and the
-                          plain published folder (files.json + mlpackage + tokenizer): s6 bundles it, s7 uploads it
-  manifest.py             manifest.json for the device archive (the app/Roll contract), unpack + layout check (s5-s7)
+  published.py            what s4 shipped (shipped(): recipe, the 14-function package, and per image budget a Variant:
+                          package, device archive, functions; from its report) and the plain published folder
+                          (files.json + mlpackage + tokenizer, one per budget folder b70/ b280/): s6 bundles, s7 uploads
+  manifest.py             b<budget>/manifest.json for a budget's device archive (the app/Roll contract, image_budget),
+                          required_functions(budget), unpack + layout check (s5-s7)
   redact.py               repo-relative paths, no home folder, in reports and anything published (report.py, s7)
 stages/sN_*/              README.md (input, output, gate, known failure modes) + run.py
 scripts/                  package. gen_status.py, gen_results.py, check_gates_adr.py, check_large_files.py,
