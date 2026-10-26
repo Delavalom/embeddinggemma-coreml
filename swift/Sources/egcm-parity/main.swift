@@ -6,7 +6,8 @@
 //     --tokenizer <dir with tokenizer.json> --fixtures fixtures --out artifacts/s5_swift/parity.json
 //
 // For each fixture text: the token ids (prompt, <bos>, <eos>) and the 768-d vector. For each fixture image at
-// budgets 70 and 280: the bucket, the sha256 of the uint8 bucket image, a pixel sample and the 768-d vector.
+// budgets 70 and 280: the bucket, the sha256 of the uint8 bucket image, a pixel sample and the 768-d vector; with
+// --pixels <dir>, also the whole bucket image as <dir>/<id>_<budget>.png (lossless), for s5's references (ADR-0008).
 // Vectors are L2-normalized (dimensions 768, so nothing is truncated); cosine does not depend on the norm.
 
 import CoreML
@@ -29,10 +30,14 @@ func publish(model: URL, tokenizer: URL, into root: URL) throws -> URL {
   return root
 }
 
-func imageResult(id: String, url: URL, budget: Int, samples: Int, model: EmbeddingGemma?) async throws -> ImageResult {
+func imageResult(id: String, url: URL, budget: Int, samples: Int, model: EmbeddingGemma?,
+                 pixels: URL? = nil) async throws -> ImageResult {
   let (img, orientation) = try Fixtures.image(url)
   let pre = try ImagePreprocessor(budget: budget).preprocess(img, orientation: orientation)
   let (h, w) = (pre.bucket.height, pre.bucket.width)
+  if let pixels {
+    try writePNG(planar: pre.planar, height: h, width: w, to: pixels.appending(path: "\(id)_\(budget).png"))
+  }
   let emb = try await model?.embed(image: img, orientation: orientation)
   return ImageResult(id: id, budget: budget, bucket: pre.bucket.name.rawValue, height: h, width: w,
                      sha256: interleavedSHA256(planar: pre.planar, height: h, width: w),
@@ -66,10 +71,12 @@ func run(_ o: Options) async throws {
   var images = try Fixtures.jsonl(o.fixtures.appending(path: "images.jsonl"), as: ImageRow.self)
   if o.limit > 0 { images = Array(images.prefix(o.limit)) }
   var imageOut: [String: ImageResult] = [:]
+  if let dir = o.pixels { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
   for (n, row) in images.enumerated() {
     for budget in [70, 280] {
       imageOut["\(row.id)_\(budget)"] = try await imageResult(id: row.id, url: o.fixtures.appending(path: row.file),
-                                                              budget: budget, samples: o.samples, model: models[budget])
+                                                              budget: budget, samples: o.samples, model: models[budget],
+                                                              pixels: o.pixels)
     }
     if (n + 1) % 50 == 0 { log("\(n + 1)/\(images.count) images") }
   }
