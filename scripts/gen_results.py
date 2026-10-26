@@ -76,6 +76,13 @@ def s4_section(r: Report | str | None) -> list[str]:
         lines.append(f"| {name} | " + " | ".join(_cell(m.get(k)) for k, _ in S4_COLUMNS)
                      + f" | {_cell(m.get('vs_raw', {}).get('min_recall_at_10'))} | {verdict} "
                      f"| {m.get('description', '-')} |")
+    if budgets := r.details.get("budgets"):  # ADR-0010: the winner split into one package per image budget
+        same = r.details.get("split_identity", {}).get("identical")
+        lines += ["", "Shipped per image budget (download MB = the device archive; `max_download_mb` is the larger): "
+                  + ", ".join(f"budget {b} `{v.get('device_archive')}` {_cell(v.get('download_mb'))} MB "
+                              f"({len(v.get('functions', []))} functions)" for b, v in sorted(budgets.items(),
+                                                                                         key=lambda kv: int(kv[0])))
+                  + f". Same outputs as the 14-function package (CPU_ONLY, bitwise): {same}."]
     return lines
 
 

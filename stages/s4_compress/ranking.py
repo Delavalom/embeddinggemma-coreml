@@ -27,10 +27,13 @@ def sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def checksums(pkg: Path, download: Path) -> dict:
-    """sha256 of the device download (`download`, the Apple Archive) and of every file of the package."""
-    files = {p.relative_to(pkg.parent).as_posix(): sha256(p) for p in sorted(pkg.rglob("*")) if p.is_file()}
-    return {"archive": {download.name: sha256(download), "bytes": download.stat().st_size}, "files": files}
+def checksums(packages: list[Path], downloads: list[Path]) -> dict:
+    """sha256 of each device download (the Apple Archives, by file name: "archive"), their sizes ("bytes"), and of
+    every file of the packages ("files", by path relative to the packages' folder)."""
+    files = {p.relative_to(pkg.parent).as_posix(): sha256(p)
+             for pkg in packages for p in sorted(pkg.rglob("*")) if p.is_file()}
+    return {"archive": {d.name: sha256(d) for d in downloads}, "bytes": {d.name: d.stat().st_size for d in downloads},
+            "files": files}
 
 
 def remove(*paths: Path) -> None:

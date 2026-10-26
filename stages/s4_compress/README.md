@@ -1,8 +1,10 @@
 # s4_compress
 
 Compressed variants of the FP16 model (`egcm/compress.py`); keeps the smallest that passes every s4 gate as
-`artifacts/s4_compress/EmbeddingGemma2.mlpackage`, plus `EmbeddingGemma2.aar` (the device download, below) and
-`checksums.json`.
+`artifacts/s4_compress/EmbeddingGemma2.mlpackage` (all 14 functions), then splits it into one package per image
+budget (ADR-0010): `EmbeddingGemma2-b70.mlpackage` and `EmbeddingGemma2-b280.mlpackage`, each with the four text
+functions and that budget's five image functions, and their device downloads `EmbeddingGemma2-b70.aar` and
+`EmbeddingGemma2-b280.aar` (below), plus `checksums.json` (both archives, every file of the three packages).
 
 Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
 
@@ -21,7 +23,18 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
    tables, the image affixes, norms and biases stay FP16. Measure-only (`MEASURE_ONLY`, never stage candidates):
    `fp16` (baseline), `vis4kv8_text8` (296 MB but min cosine 0.917 and int4 vision convs on the CPU), `int8`
    (about 410 MB).
-4. `--measure a,b,...` evaluates named variants without the stage runner (`measure/measurement.json`);
+4. **Split per budget** (`split.py`, ADR-0010), winner only. For each budget, in its own process under
+   `egcm.parts`' memory guard: `extract` copies the budget's nine functions out of the 14-function package with
+   `egcm.mfmerge.merge` (what coremltools' `MultiFunctionDescriptor` + `save_multifunction` do, as in
+   `scripts/probes/extract_functions.py`, but streaming one weight at a time: the MIL of each function is copied
+   unchanged, each distinct weight stored once). Then the function names and the I/O contract are checked and the
+   device archive is built (inside it the package is named `EmbeddingGemma2.mlpackage`, whichever budget). Then
+   `identity`, one more process: every function of both budget packages and the same function of the 14-function
+   package on one deterministic input (`split.feed`), `CPU_ONLY`, one model loaded at a time; the output bytes must
+   be equal, else the stage raises (status `error`) and writes no `checksums.json`. Result:
+   `details.split_identity`. The 14-function package is kept (the Swift end-to-end tests and `s6 --package` use it,
+   about 450 MB); its archive is deleted (it was only the variant's gated `download_mb`).
+5. `--measure a,b,...` evaluates named variants without the stage runner (`measure/measurement.json`);
    `python -m scripts.measure_s4_eval a,b --placement a` does the same without the placement analysis except for
    the variants after `--placement` (`measure/fast.json`).
 
@@ -37,8 +50,13 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
   whose exact-aspect top-1 image is in the package's top 10) and `max_i2i_label_p10_drop` (image→image category
   precision@10 of the exact-aspect reference minus the package's).
 - `max_download_mb`: the device download, `egcm.archive.device_archive`: one Apple Archive (LZFSE) holding
-  `EmbeddingGemma2.mlpackage/**` and `tokenizer/{tokenizer.json,tokenizer_config.json}`. The deflate zip of the
+  `EmbeddingGemma2.mlpackage/**` and `tokenizer/{tokenizer.json,tokenizer_config.json}`. For the winner it is the
+  **larger of the two budget archives** (what any one phone downloads; ADR-0010). Choosing the winner uses each
+  variant's 14-function archive (`variants.<recipe>.download_mb`), which is at least as large. The deflate zip of the
   package alone is recorded as `zip_mb`, not gated.
+- `details.budgets.<budget>`: `package`, `device_archive`, `functions`, `package_mb`, `download_mb` (what
+  `egcm.published.shipped` reads); `details.split_identity`: per budget and function, `identical` and
+  `max_abs_diff`.
 - Recorded only (`vs_raw`, `[s4_compress.targets]`): text→image recall@10 and p5 Spearman against exact-aspect;
   fixed buckets cannot reach 0.95 there (s0's own bucketed vectors give 0.855 / 0.877).
 
@@ -60,6 +78,12 @@ Run: `just stage 4` (the `convert` group). Needs fresh passing s0 and s3.
   could pass the original gates. The ranking gates are now against the bucketed FP reference, and bucketing is gated
   at task level (`min_t2i_top1_in_top10`, `max_i2i_label_p10_drop`).
 - **The merged package is about the sum of its parts**: deduplication failed (a recipe that is not deterministic).
+- **"the budget packages differ from the 14-function package (CPU_ONLY)"**: the split changed a function. The
+  extract copies each function's MIL and weights unchanged, so this is a bug in `split.py` or `egcm.mfmerge` (a
+  weight pointed at the wrong offset), not precision. `details.split_identity` lists the functions and the largest
+  difference. Nothing downstream can use the run (no `checksums.json`).
+- **`stages.s4_compress.split extract failed (memory guard)`**: the extract passed `egcm.parts.FOOTPRINT_LIMIT_GB`.
+  It holds one weight at a time, so look for another process using the memory.
 - **Download over 360 MB**: `int8_table4`'s package zip was 350 MB (2026-10-24); the gated device archive adds the
   tokenizer (about 32 MB before compression) and uses LZFSE, so check `download_mb`, not `zip_mb`. `int8`, with the
   table at int8 too, is about 60 MB more. The table alone is 134 MB at int8 and 75 MB at int4 (blocks of 32).

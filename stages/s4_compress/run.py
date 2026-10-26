@@ -3,7 +3,8 @@
 
 Gates (gates.toml [s4_compress], ADR-0007): min_cosine, min_recall_at_10 and min_p5_spearman_top50 (against the
 bucketed FP reference), min_t2i_top1_in_top10 and max_i2i_label_p10_drop (bucketing, against exact-aspect),
-max_download_mb. See stages/s4_compress/README.md.
+max_download_mb. The winner is then split into one package and device archive per image budget (ADR-0010,
+stages/s4_compress/split.py); `max_download_mb` is the larger of those archives. See stages/s4_compress/README.md.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import numpy as np
 
 from egcm import parts
 from egcm.archive import device_archive
+from egcm.buckets import BUDGETS
 from egcm.compress import MEASURE_ONLY, RECIPES
 from egcm.config import HF_SNAPSHOT, load
 from egcm.convert import compile_package, contract_problems, disk_free_gb, size_mb
@@ -30,7 +32,7 @@ from egcm.placement import ane_placement_per_function
 from egcm.ranking import metrics as task_metrics
 from egcm.report import Report
 from egcm.stage import run_stage
-from stages.s4_compress import ranking
+from stages.s4_compress import ranking, split
 
 STAGE = "s4_compress"
 UNITS = ct.ComputeUnit.CPU_AND_NE  # the shipping configuration
@@ -121,23 +123,40 @@ def fill(report: Report) -> None:
     for recipe in RECIPES:
         if recipe != chosen:
             ranking.remove(out / f"{recipe}.mlpackage", out / f"{recipe}.aar")
-    final, final_aar = out / "EmbeddingGemma2.mlpackage", out / "EmbeddingGemma2.aar"
-    ranking.remove(final, final_aar, out / "EmbeddingGemma2.mlpackage.zip", out / "checksums.json")
+    final = out / "EmbeddingGemma2.mlpackage"
+    ranking.remove(final, out / "EmbeddingGemma2.aar", out / "EmbeddingGemma2.mlpackage.zip", out / "checksums.json",
+                   *(out / n for b in BUDGETS for n in split.names(b)))
     (out / f"{chosen}.mlpackage").rename(final)
-    if winner:  # the shippable package and its device download (the archive names the package EmbeddingGemma2)
-        (out / f"{chosen}.aar").rename(final_aar)
-        (out / "checksums.json").write_text(json.dumps(ranking.checksums(final, final_aar), indent=1) + "\n")
-    else:
-        ranking.remove(out / f"{chosen}.aar")
+    # The 14-function archive was the variant's gated download_mb; what ships is one archive per budget (ADR-0010).
+    ranking.remove(out / f"{chosen}.aar")
     m = variants[chosen]
     report.metrics |= {k: m[METRIC_FOR_GATE.get(k, k)] for k in gates}
     # recorded only (gates.toml [s4_compress.targets]): text->image recall@10 against exact-aspect (ADR-0007)
     report.details["targets"] = {k: {"target": v, "value": m["vs_raw"][TARGET_METRIC[k]]}
                                  for k, v in targets(STAGE).items()}
-    report.details |= {"chosen": chosen, "winner": winner, "package": final.name,
-                       "device_archive": final_aar.name if winner else None, "zip_mb": m["zip_mb"],
-                       "seconds": round(time.monotonic() - t0, 1)}
+    report.details |= {"chosen": chosen, "winner": winner, "package": final.name, "zip_mb": m["zip_mb"]}
+    if winner:
+        ship_budgets(report, final, out, log)
+    report.details["seconds"] = round(time.monotonic() - t0, 1)
     log(f"done: chosen {chosen} (winner {winner})")
+
+
+def ship_budgets(report: Report, final, out, log) -> None:
+    """ADR-0010: splits the gated 14-function package into one package and device archive per image budget, checks
+    the split changed no output (CPU_ONLY, bitwise; raises otherwise), then writes checksums.json for both archives.
+    `max_download_mb` becomes the larger archive: what any one phone downloads. The 14-function package stays as
+    `EmbeddingGemma2.mlpackage` (the Swift end-to-end tests and `s6 --package` use it); its archive is not kept."""
+    budgets = split.split(final, out, HF_SNAPSHOT, log)
+    report.details["budgets"] = budgets
+    report.metrics["max_download_mb"] = max(v["download_mb"] for v in budgets.values())
+    packages = {int(b): out / v["package"] for b, v in budgets.items()}
+    report.details["split_identity"] = same = split.identity(final, packages, out / "identity", log)
+    if not same["identical"]:
+        bad = [f"b{b}/{fn}" for b, v in same["budgets"].items() for fn, r in v["functions"].items()
+               if not r["identical"]]
+        raise RuntimeError(f"the budget packages differ from the 14-function package (CPU_ONLY): {bad}")
+    sums = ranking.checksums([final, *packages.values()], [out / v["device_archive"] for v in budgets.values()])
+    (out / "checksums.json").write_text(json.dumps(sums, indent=1) + "\n")
 
 
 def measure(recipes: list[str]) -> dict:

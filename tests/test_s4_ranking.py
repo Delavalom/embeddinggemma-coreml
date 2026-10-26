@@ -30,6 +30,12 @@ def test_zip_and_checksums(tmp_path):
     (pkg / "Manifest.json").write_text("{}")
     z = ranking.zip_package(pkg, tmp_path / "M.zip")
     assert sorted(zipfile.ZipFile(z).namelist()) == ["M.mlpackage/Data/w.bin", "M.mlpackage/Manifest.json"]
-    c = ranking.checksums(pkg, z)
-    assert set(c["files"]) == {"M.mlpackage/Data/w.bin", "M.mlpackage/Manifest.json"}
-    assert c["archive"]["bytes"] == z.stat().st_size and len(c["archive"]["M.zip"]) == 64
+    other = tmp_path / "N.mlpackage"
+    other.mkdir()
+    (other / "Manifest.json").write_text("{}")
+    second = tmp_path / "N.aar"
+    second.write_bytes(b"y" * 10)
+    c = ranking.checksums([pkg, other], [z, second])  # every package and every archive s4 keeps (ADR-0010)
+    assert set(c["files"]) == {"M.mlpackage/Data/w.bin", "M.mlpackage/Manifest.json", "N.mlpackage/Manifest.json"}
+    assert c["bytes"] == {"M.zip": z.stat().st_size, "N.aar": 10}
+    assert set(c["archive"]) == {"M.zip", "N.aar"} and all(len(s) == 64 for s in c["archive"].values())
