@@ -1,4 +1,7 @@
-import sys, coremltools as ct
+import sys
+
+import coremltools as ct
+
 src, out, fns = sys.argv[1], sys.argv[2], sys.argv[3].split(",")
 d = ct.utils.MultiFunctionDescriptor()
 for fn in fns:
