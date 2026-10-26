@@ -156,9 +156,13 @@ public actor EmbeddingGemma {
     let config = MLModelConfiguration()
     config.functionName = name
     config.computeUnits = computeUnits
-    let url = compiledModel
+    let url = compiledModel, units = computeUnits
     let task = Task { () throws -> LoadedFunction in
-      do { return LoadedFunction(model: try await MLModel.load(contentsOf: url, configuration: config)) } catch {
+      do {
+        return LoadedFunction(model: try await FunctionLoad.withRetries(computeUnits: units) {
+          try await MLModel.load(contentsOf: url, configuration: config)
+        })
+      } catch let e as CancellationError { throw e } catch {
         throw EmbeddingGemmaError.modelLoadFailed(underlying: error)
       }
     }
@@ -167,6 +171,27 @@ public actor EmbeddingGemma {
       functions[name] = nil  // let a later call retry
       throw error
     }
+  }
+}
+
+/// Retries for loading one function.
+///
+/// On iOS 27.0.1 (iPhone 13 Pro Max) Core ML intermittently fails the first Neural Engine compile of a function,
+/// 40–55 s in, with a misleading "`.functionName` property must be `nil` unless the model type is ML Program". The
+/// same load succeeded on the next attempt in every case observed (5 failures in about 30 cold compiles, with 0 to 5
+/// other functions loaded). Loads that may use the Neural Engine therefore get `attempts` tries; `.cpuOnly` gets one.
+enum FunctionLoad {
+  static let attempts = 3
+
+  static func withRetries<T>(computeUnits: MLComputeUnits, attempts: Int = attempts,
+                             _ load: () async throws -> T) async throws -> T {
+    let tries = computeUnits == .cpuOnly ? 1 : max(1, attempts)
+    var failure: any Error = CancellationError()
+    for _ in 0..<tries {
+      try Task.checkCancellation()
+      do { return try await load() } catch let e as CancellationError { throw e } catch { failure = error }
+    }
+    throw failure
   }
 }
 
