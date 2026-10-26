@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from string import Template
 
+from egcm.buckets import BUDGETS
 from egcm.manifest import ARCHIVE_NAME, MANIFEST_JSON
 from egcm.paths import HF_REPO, HF_REVISION, STAGES
 from egcm.report import Report, read_report
@@ -86,16 +87,29 @@ def worst_images(variant: dict, n: int = 3) -> str:
     return ", ".join(f"{i} {c:.5f} (`{f}`)" for c, i, f in sorted(worst)[:n])
 
 
-def values(root: Path, manifest: dict | None = None) -> dict[str, str]:
-    """Every `$name` of model_card.md except `repo` and `results`. `manifest` is the uploaded manifest.json
-    (egcm.manifest.write), for the unpacked size."""
+def budget_values(s4: Report | None, manifests: dict[str, dict] | None) -> dict[str, str]:
+    """Per image budget b (ADR-0010): `download_mb_<b>`, `package_mb_<b>` (s4's `details.budgets`) and
+    `unpacked_mb_<b>` (the uploaded b<b>/manifest.json)."""
+    out = {}
+    for b in BUDGETS:
+        shipped = _get(s4.details, "budgets", str(b)) if s4 else None
+        unpacked = _get(manifests or {}, str(b), "unpacked_size")
+        out |= {f"download_mb_{b}": _num(_get(shipped, "download_mb"), 1),
+                f"package_mb_{b}": _num(_get(shipped, "package_mb"), 1),
+                f"unpacked_mb_{b}": _num(unpacked / 1e6 if unpacked else None, 1)}
+    return out
+
+
+def values(root: Path, manifests: dict[str, dict] | None = None) -> dict[str, str]:
+    """Every `$name` of model_card.md except `repo` and `results`. `manifests`: image budget ("70", "280") -> the
+    uploaded b<budget>/manifest.json (egcm.manifest.write), for the unpacked sizes."""
     s0, s1, s2, s3, s4, s5, s6 = (_report(root, s) for s in STAGES[:7])
     m = lambda r, k: r.metrics.get(k) if r else None  # noqa: E731
     det = lambda r, *k: _get(r.details, *k) if r else None  # noqa: E731
     chosen = det(s4, "chosen")
     v = det(s4, "variants", chosen) if chosen else None
     v = v if isinstance(v, dict) else {}
-    return {
+    return budget_values(s4, manifests) | {
         "github": GITHUB_REPO,
         "base_repo": HF_REPO,
         "base_revision": det(s0, "revision") or HF_REVISION,
@@ -113,10 +127,9 @@ def values(root: Path, manifest: dict | None = None) -> dict[str, str]:
         "worst_images": worst_images(v),
         "variant": chosen or PENDING,
         "variant_description": v.get("description", PENDING),
-        "download_mb": _num(v.get("download_mb"), 1), "package_mb": _num(v.get("package_mb"), 1),
-        "archive": det(s4, "device_archive") or ARCHIVE_NAME, "manifest": MANIFEST_JSON,
+        "download_mb": _num(m(s4, "max_download_mb") if det(s4, "budgets") else None, 1),
+        "archive": ARCHIVE_NAME, "manifest": MANIFEST_JSON,
         "max_download_mb": _num(s4.gate_values.get("max_download_mb") if s4 else None, 0),
-        "unpacked_mb": _num((manifest or {}).get("unpacked_size", 0) / 1e6 or None, 1),
         "text_cos": _num(v.get("min_cosine_text"), 5), "image_cos": _num(v.get("min_cosine_image"), 5),
         "p1_image_cos": _num(v.get("min_p1_cosine_image"), 5),
         "recall_70": _num(_get(v, "vs_bucket", "by_budget", "70", "recall_at_10"), 3),

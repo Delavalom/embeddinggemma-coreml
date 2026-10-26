@@ -12,7 +12,8 @@ from egcm.report import Report, read_report, write_report
 from stages.s7_publish import run as s7
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
-SHAS = {"files_json_sha256": "f" * 64, "manifest_json_sha256": "e" * 64}
+SHAS = {"files_json_sha256": {"70": "f" * 64, "280": "d" * 64},  # per image budget (ADR-0010)
+        "manifest_json_sha256": {"70": "e" * 64, "280": "c" * 64}}
 
 
 class Untouchable:
@@ -149,7 +150,7 @@ def test_publish_order_with_fakes(tmp_path, monkeypatch):
     assert hf.calls[1][0] == "upload_folder"
     swift = (tmp_path / s7.DEFAULT_MODEL_SWIFT).read_text()
     assert 'defaultRepo = "me/model"' in swift and f'defaultRevision = "{SHA}"' in swift
-    assert f'defaultManifestSHA256: String? = "{"e" * 64}"' in swift
+    assert f'defaultManifestSHA256: [Int: String] = [70: "{"e" * 64}", 280: "{"c" * 64}"]' in swift
     assert [c[:2] for c in calls] == [["git", "add"], ["git", "commit"], ["git", "tag"], ["gh", "repo"],
                                       ["git", "push"], ["git", "push"], ["gh", "release"]]
     assert "--accept-visibility-change-consequences" in calls[3]
@@ -192,12 +193,16 @@ def test_model_card_numbers_come_from_the_reports(tmp_path):
                "latency_cpu_and_ne": {"embed_text_16": {"median_ms": 4.424}},
                "by_function": {"image": {"embed_image_280_landscape": {"worst": [["i161", 0.99133], ["i150", 0.9943]]},
                                          "embed_image_70_wide": {"worst": [["i141", 0.99322]]}}}}
-    write(tmp_path, "s4_compress", details={"chosen": "int8_table4", "variants": {"int8_table4": variant}})
+    budgets = {"70": {"download_mb": 343.12, "package_mb": 430.04}, "280": {"download_mb": 352.81}}  # ADR-0010
+    write(tmp_path, "s4_compress", metrics={"max_download_mb": 352.81},
+          details={"chosen": "int8_table4", "variants": {"int8_table4": variant}, "budgets": budgets})
     device = {"os_version": "26.0", "peak_rss_mb": 612.4, "query": {"ms": {"median": 7.0}},
               "budgets": {"70": {"ms_per_image": {"median": 41.25}}}}
     write(tmp_path, "s6_device", metrics={"ms_per_image_70_median": 41.25}, details={"devices": {"iPhone16,1": device}})
     v = s7.card.values(tmp_path)
-    assert v["variant"] == "int8_table4" and v["download_mb"] == "349.7" and v["package_mb"] == "452.4"
+    assert v["variant"] == "int8_table4" and v["download_mb"] == "352.8"  # the larger budget archive
+    assert (v["download_mb_70"], v["download_mb_280"], v["package_mb_70"], v["package_mb_280"]) == (
+        "343.1", "352.8", "430.0", "pending")
     assert (v["text_cos"], v["image_cos"]) == ("0.99791", "0.99133")
     assert (v["recall_70"], v["recall_280"], v["ms_text_16"]) == ("0.962", "0.966", "4.4")
     assert v["base_revision"] == "r" * 40 and v["raw_vs_bucket_70"] == "0.916" and v["raw_vs_bucket_280"] == "pending"
@@ -242,4 +247,5 @@ def test_publish_uses_and_prints_the_hub_spelling_of_the_repo(tmp_path, monkeypa
     assert 'defaultRepo = "Delavalom/EmbeddingGemma-2-CoreML"' in (tmp_path / s7.DEFAULT_MODEL_SWIFT).read_text()
     line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("PUBLISHED_MODEL "))
     assert json.loads(line.removeprefix("PUBLISHED_MODEL ")) == {
-        "repo": "Delavalom/EmbeddingGemma-2-CoreML", "revision": SHA, "manifest_sha256": "e" * 64}
+        "repo": "Delavalom/EmbeddingGemma-2-CoreML", "revision": SHA, "manifest_sha256": {"70": "e" * 64,
+                                                                                           "280": "c" * 64}}

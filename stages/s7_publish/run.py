@@ -120,25 +120,29 @@ def preflight(root: Path, tag: str, pub: Publisher, repo: str | None = None) -> 
     except Exception as e:  # no report, unreadable, or no winner
         out.append(f"s4_compress: {e}")
     else:
-        for p in (s4.package / "Manifest.json", s4.archive):
-            if not p.is_file():
-                out.append(f"{p} (s4 recipe {s4.recipe}) is missing; rerun `just stage 4`")
-        try:
-            manifest.check_functions(s4.functions)
-        except ValueError as e:
-            out.append(f"s4_compress: {e}")
+        for b, v in sorted(s4.budgets.items()):
+            for p in (v.package / "Manifest.json", v.archive):
+                if not p.is_file():
+                    out.append(f"{p} (s4 recipe {s4.recipe}, budget {b}) is missing; rerun `just stage 4`")
+            try:
+                manifest.check_functions(v.functions, b)
+            except ValueError as e:
+                out.append(f"s4_compress: {e}")
     return out
 
 
-def render_default_model(repo: str, revision: str, manifest_sha256: str) -> str:
+def render_default_model(repo: str, revision: str, manifest_sha256: dict[str, str]) -> str:
+    """DefaultModel.swift. `manifest_sha256`: image budget ("70", "280") -> sha256 of `b<budget>/manifest.json`."""
+    pins = ", ".join(f'{int(b)}: "{sha}"' for b, sha in sorted(manifest_sha256.items(), key=lambda kv: int(kv[0])))
     return f"""// The published Core ML model. Written by stages/s7_publish (Task 22): the Hugging Face repo, the commit
-// SHA of the upload and the sha256 of its manifest.json.
+// SHA of the upload and the sha256 of each image budget's manifest.json (b70/, b280/; ADR-0010).
 public extension EmbeddingGemma {{
   static let defaultRepo = "{repo}"
   static let defaultRevision = "{revision}"
-  /// sha256 of `manifest.json` at `defaultRevision`. When set, loading the default model verifies `manifest.json`
-  /// against it (on top of the pinned commit), so a compromised or rewritten Hub file is rejected.
-  static let defaultManifestSHA256: String? = "{manifest_sha256}"
+  /// sha256 of `b<budget>/manifest.json` at `defaultRevision`, per image budget. Loading the default model verifies
+  /// the budget's `manifest.json` against it (on top of the pinned commit), so a compromised or rewritten Hub file
+  /// is rejected.
+  static let defaultManifestSHA256: [Int: String] = [{pins}]
 }}
 """
 
@@ -154,21 +158,29 @@ RELEASE_NOTES_DIR = Path("docs/release-notes")
 
 
 def build_upload(root: Path, repo: str, tag: str, out: Path) -> dict:
-    """The upload folder: the plain published layout (files.json covers the package and tokenizer only, so it is
-    written first), s4's device archive with manifest.json (what apps download), README.md (model card), LICENSE
-    and NOTICE. Returns the sha256 of files.json and of manifest.json."""
+    """The upload folder (replaced): per image budget, `b<budget>/` with the plain published layout (files.json
+    covers the package and tokenizer only, so it is written first) and s4's device archive with manifest.json (what
+    apps download); at the root README.md (model card), LICENSE and NOTICE. Returns, per budget ("70", "280"), the
+    sha256 of files.json and of manifest.json."""
     s4 = published.shipped(root)
-    files_sha = published.assemble(s4.package, published.tokenizer_source(root), out)
-    manifest_sha = manifest.write(s4, out, revision=tag)  # s4's gated archive, as is
+    tokenizer = published.tokenizer_source(root)
+    shutil.rmtree(out, ignore_errors=True)
+    files_sha, manifest_sha = {}, {}
+    for b, v in sorted(s4.budgets.items()):
+        files_sha[str(b)] = published.assemble(v.package, tokenizer, out / published.budget_dir(b))
+        manifest_sha[str(b)] = manifest.write(v, out, revision=tag)  # s4's gated archive, as is
     write_card(root, repo, out)
     copy_extras(root, out)
     if found := files_with_home_paths(out.rglob("*")):
         raise RuntimeError(f"the upload names absolute local paths: {found}")
     return {"files_json_sha256": files_sha, "manifest_json_sha256": manifest_sha}
 
+
 def write_card(root: Path, repo: str, out: Path) -> None:
-    """out/README.md: the model card for `repo`, with the unpacked size from out/manifest.json."""
-    vals = card.values(root, json.loads((out / manifest.MANIFEST_JSON).read_text()))
+    """out/README.md: the model card for `repo`, with the unpacked sizes from out/b<budget>/manifest.json."""
+    manifests = {p.parent.name.removeprefix("b"): json.loads(p.read_text())
+                 for p in sorted(out.glob(f"b*/{manifest.MANIFEST_JSON}"))}
+    vals = card.values(root, manifests)
     (out / "README.md").write_text(model_card(repo, (root / RESULTS_MD).read_text(), vals, root))
 
 
@@ -204,7 +216,7 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     if not revision or not _SHA.fullmatch(revision):
         raise RuntimeError(f"the upload returned no commit SHA (got {revision!r})")
     repo = hub_repo
-    log(f"uploaded commit {revision}, sha256(manifest.json) {shas['manifest_json_sha256']}")
+    log(f"uploaded commit {revision}, sha256 of b<budget>/manifest.json {shas['manifest_json_sha256']}")
     (root / DEFAULT_MODEL_SWIFT).write_text(render_default_model(repo, revision, shas["manifest_json_sha256"]))
     pub.check(["git", "add", str(DEFAULT_MODEL_SWIFT)])
     pub.check(["git", "commit", "-m", f"chore(release): pin the default model to {repo}@{revision[:12]}"])
@@ -215,13 +227,15 @@ def publish(root: Path, repo: str, tag: str, pub: Publisher) -> dict:
     pub.check(["git", "push", "origin", tag])
     notes = release_notes(root, tag, root / "artifacts" / STAGE / "release_notes.md")
     pub.check(["gh", "release", "create", tag, "--title", f"EmbeddingGemma {tag}", "--notes-file", str(notes)])
-    log(f"published https://huggingface.co/{repo}/resolve/{revision}/{manifest.MANIFEST_JSON}")
+    for b in sorted(shas["manifest_json_sha256"], key=int):
+        log(f"published https://huggingface.co/{repo}/resolve/{revision}/b{b}/{manifest.MANIFEST_JSON}")
     print(published_model_line(repo, revision, shas["manifest_json_sha256"]), flush=True)
     return {"hf_repo": repo, "revision": revision, **shas, "tag": tag}
 
 
-def published_model_line(repo: str, revision: str, manifest_sha256: str) -> str:
-    """The three values an app pins (Roll's PublishedModel.current), one JSON object on one line."""
+def published_model_line(repo: str, revision: str, manifest_sha256: dict[str, str]) -> str:
+    """The values an app pins (Roll's PublishedModel.current), one JSON object on one line: the repo, the revision,
+    and the sha256 of each budget's manifest.json ({"70": ..., "280": ...}; ADR-0010)."""
     return "PUBLISHED_MODEL " + json.dumps({"repo": repo, "revision": revision, "manifest_sha256": manifest_sha256})
 
 

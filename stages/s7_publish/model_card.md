@@ -12,17 +12,20 @@ tags: [coreml, embeddings, multimodal-embedding, image-text, sentence-similarity
 # EmbeddingGemma 2 for Core ML
 
 This is [`$base_repo`](https://huggingface.co/$base_repo) (Google DeepMind's text and image embedding model, one
-shared 768-d space) converted to a **multifunction Core ML model that runs on the Apple Neural Engine**. Every stage
-of the conversion was checked against the original PyTorch model. It is an unofficial conversion. It is not made or
+shared 768-d space) converted to **multifunction Core ML models that run on the Apple Neural Engine**, one per image
+budget. Every stage of the conversion was checked against the original PyTorch model. It is an unofficial conversion. It is not made or
 endorsed by Google.
 
 - **Base model:** `$base_repo` at revision `$base_revision` (`model.safetensors` sha256 `$base_sha256`).
 - **Modalities:** text and images. Audio and video are not converted.
 - **Variant shipped:** `$variant`: $variant_description.
-- **Size:** apps download one file, `$archive` ($download_mb MB, an LZFSE Apple Archive of the package and the
-  tokenizer; the s4 gate is $max_download_mb MB), described by `$manifest` (size and SHA-256). Unpacked it is
-  $unpacked_mb MB; the package alone is $package_mb MB. The same files are also here unpacked, each listed with its
-  size and SHA-256 in `files.json`.
+- **Layout:** one folder per image budget, `b70/` and `b280/`. Each holds the text functions and that budget's image
+  functions; a device uses one budget only, so it downloads one folder's archive.
+- **Size:** apps download one file, `b<budget>/$archive` (an LZFSE Apple Archive of the package and the tokenizer:
+  $download_mb_70 MB for budget 70, $download_mb_280 MB for budget 280; the s4 gate is $max_download_mb MB for the
+  larger), described by `b<budget>/$manifest` (size, SHA-256 and image budget). Unpacked it is $unpacked_mb_70 /
+  $unpacked_mb_280 MB; the package alone is $package_mb_70 / $package_mb_280 MB. The same files are also in each
+  folder unpacked, each listed with its size and SHA-256 in `b<budget>/files.json`.
 - **Runs on:** iOS 18+ and macOS 15+ (the model uses `ios18` ops). It is built for `.cpuAndNeuralEngine`.
 - **Swift package:** [`EmbeddingGemma`](https://github.com/$github) (download, verification,
   tokenizer, image preprocessing, plus an on-disk vector index). See "Use from Swift" below.
@@ -48,14 +51,16 @@ endorsed by Google.
 
 ## Functions
 
-One `.mlpackage`, 14 functions with fixed shapes. Every function returns `embedding`, float32 `[1, 768]`,
-L2-normalized.
+One `.mlpackage` per image budget, `b70/EmbeddingGemma2.mlpackage` and `b280/EmbeddingGemma2.mlpackage`, each with
+nine functions with fixed shapes: the four text functions (the same in both) and the five image functions of its
+budget. Both were split from one 14-function package, and every function gives the same output bytes as there.
+Every function returns `embedding`, float32 `[1, 768]`, L2-normalized.
 
 | function | input | tokens |
 |---|---|---|
 | `embed_text_16`, `_32`, `_64`, `_128` | `input_ids` int32 `[1, L]`, `attention_mask` int32 `[1, L]` (1 = token, 0 = padding) | L = 16 / 32 / 64 / 128 |
-| `embed_image_70_{tall,portrait,square,landscape,wide}` | `pixels` `[1, 3, H, W]`, RGB in 0-1 | 60-70 image tokens |
-| `embed_image_280_{tall,portrait,square,landscape,wide}` | `pixels` `[1, 3, H, W]`, RGB in 0-1 | 256-280 image tokens |
+| `embed_image_70_{tall,portrait,square,landscape,wide}` (in `b70/`) | `pixels` `[1, 3, H, W]`, RGB in 0-1 | 60-70 image tokens |
+| `embed_image_280_{tall,portrait,square,landscape,wide}` (in `b280/`) | `pixels` `[1, 3, H, W]`, RGB in 0-1 | 256-280 image tokens |
 
 Image shapes (H x W). The bucket comes from the aspect ratio r = width / height: tall r < 0.6, portrait r < 0.83,
 square r <= 1.2, landscape r <= 1.67, wide above that.
@@ -127,7 +132,7 @@ difference against the reference preprocessing is $s5_pixel (0-1 units).
 **Mac** (s4, `CPU_AND_NE`, median of 20 runs after warm-up). These were measured on the build Mac; the v1.0.0
 build Mac is an M1 Pro with macOS 26. `embed_text_16` takes $ms_text_16 ms and `embed_image_70_square` takes
 $ms_image_70_square ms. In every function, at least $ane_fraction of the ops are placed on the Neural Engine (`MLComputePlan`, minimum
-over the 14 functions).
+over the 14 functions, measured on the package the two budget packages were split from).
 
 **iPhone** (s6, PhotoSearchDemo's benchmark: the newest 1,000 photos at budget 70, then 200 at budget 280, and 20
 queries; times cover preprocessing + prediction):
@@ -139,10 +144,12 @@ $s6_devices
 Worst device: $s6_ms_70 ms per image at 70, $s6_ms_280 ms at 280, $s6_ms_query ms per query, peak $s6_rss MB (the
 gate is 800 MB; the target for budget 70 is 60 ms, which is recorded, not gated).
 
-**Storage:** the Swift package downloads `$archive` ($download_mb MB, resumable), checks its size and SHA-256 against
-`$manifest`, unpacks it ($unpacked_mb MB) with the AppleArchive framework and compiles the package. It needs free
-space for the archive, the unpacked files and the compiled model while it installs; afterwards it keeps the compiled
-model and the tokenizer. $download_mb MB is the size the s4 gate measures (limit $max_download_mb MB).
+**Storage:** the Swift package downloads the archive of the device's image budget, `b<budget>/$archive`
+($download_mb_70 MB at 70, $download_mb_280 MB at 280, resumable), checks its size and SHA-256 against
+`b<budget>/$manifest`, unpacks it ($unpacked_mb_70 / $unpacked_mb_280 MB) with the AppleArchive framework and
+compiles the package. It needs free space for the archive, the unpacked files and the compiled model while it
+installs; afterwards it keeps the compiled model and the tokenizer. The s4 gate measures the larger archive,
+$download_mb MB (limit $max_download_mb MB).
 
 ## Use from Swift
 
@@ -156,8 +163,9 @@ let photo = try await model.embed(image: cgImage, orientation: .up)  // [Float],
 let query = try await model.embed(query: "receipts from last week")
 ```
 
-The package pins this repo (`$repo`) at a commit and the SHA-256 of `$manifest`, which pins the archive's size and
-SHA-256. `budget: .auto` picks 280 tokens on A17 Pro and newer iPhones and on Macs, and 70 on other devices.
+The package pins this repo (`$repo`) at a commit and the SHA-256 of each budget's `$manifest`, which pins its
+archive's size and SHA-256. `budget: .auto` picks 280 tokens on A17 Pro and newer iPhones and on Macs, and 70 on
+other devices, and loads that budget's folder (`b280/` or `b70/`) only.
 
 ## Use from Python (coremltools, macOS 15+)
 
@@ -167,8 +175,9 @@ from tokenizers import Tokenizer
 from torchvision.transforms.functional import pil_to_tensor, resize, InterpolationMode
 from PIL import Image
 
-PKG = "EmbeddingGemma2.mlpackage"
-tok = Tokenizer.from_file("tokenizer/tokenizer.json")
+BUDGET = 280  # the folder you downloaded: b280/ or b70/; its text functions are the same in both
+PKG = f"b{BUDGET}/EmbeddingGemma2.mlpackage"
+tok = Tokenizer.from_file(f"b{BUDGET}/tokenizer/tokenizer.json")
 # self-check: the layout the model was traced with is <bos> ... <eos>
 assert tok.encode("task: search result | query: screenshots of tweets").ids == \
     [2, 8071, 236787, 3927, 1354, 1109, 7609, 236787, 75490, 529, 46331, 1]
@@ -193,12 +202,12 @@ def bucket(r):  # r = width / height
     return ("tall" if r < 0.6 else "portrait" if r < 0.83 else "square" if r <= 1.2
             else "landscape" if r <= 1.67 else "wide")
 
-def embed_image(path, budget=280):
+def embed_image(path):
     img = Image.open(path).convert("RGB")  # like the reference: 8-bit RGB, ICC profile ignored
     name = bucket(img.width / img.height)
-    px = resize(pil_to_tensor(img), list(SHAPES[budget][name]), InterpolationMode.BICUBIC, antialias=True)
+    px = resize(pil_to_tensor(img), list(SHAPES[BUDGET][name]), InterpolationMode.BICUBIC, antialias=True)
     px = px.float() / 255
-    return fn(f"embed_image_{budget}_{name}").predict({"pixels": px[None].numpy()})["embedding"][0]
+    return fn(f"embed_image_{BUDGET}_{name}").predict({"pixels": px[None].numpy()})["embedding"][0]
 
 def truncate(v, dims=256):  # Matryoshka
     v = v[:dims]; return v / np.linalg.norm(v)
