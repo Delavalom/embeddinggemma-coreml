@@ -37,17 +37,22 @@ struct LaunchArguments {
 /// Where the demo gets its model.
 ///
 /// The model is not published yet, so `just stage 6` assembles the published folder layout (`files.json`,
-/// `EmbeddingGemma2.mlpackage/`, `tokenizer/`) from the s4 package into `Examples/PhotoSearchDemo/Model/`, and the
-/// app bundles it as the `Model` resource. `EmbeddingGemma.load(.file(...))` then verifies every file against
-/// `files.json`, copies it into Application Support and compiles it once (later launches reuse that). Without a
-/// bundled folder the app uses the published Hugging Face default (`EmbeddingGemma.defaultRevision`).
+/// `EmbeddingGemma2.mlpackage/`, `tokenizer/`) from s4 into `Examples/PhotoSearchDemo/Model/`, and the app bundles
+/// it as the `Model` resource: one layout per image budget in `Model/b70/` and `Model/b280/` (ADR-0010), or one
+/// 14-function layout in `Model/` itself. `EmbeddingGemma.load(.file(...))` picks `Model/b<budget>/` when it exists,
+/// verifies every file against its `files.json`, copies it into Application Support and compiles it once (later
+/// launches reuse that). Without a bundled folder the app uses the published Hugging Face default
+/// (`EmbeddingGemma.defaultRevision`).
 enum DemoModel {
   /// Vector length stored in the index.
   static let dimensions = 256
 
   static var bundledFolder: URL? {
-    guard let url = Bundle.main.url(forResource: "Model", withExtension: nil),
-          FileManager.default.fileExists(atPath: url.appending(path: "files.json").path) else { return nil }
+    guard let url = Bundle.main.url(forResource: "Model", withExtension: nil) else { return nil }
+    let layouts = ["files.json", "b70/files.json", "b280/files.json"]
+    guard layouts.contains(where: { FileManager.default.fileExists(atPath: url.appending(path: $0).path) }) else {
+      return nil
+    }
     return url
   }
 

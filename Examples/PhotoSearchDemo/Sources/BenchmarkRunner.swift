@@ -9,7 +9,8 @@ import UIKit
 /// The s6 benchmark (launch argument `-benchmark`): 1,000 photos at budget 70, then 200 at 280, plus text queries.
 /// Writes `Documents/s6_device.json` (read by stages/s6_device/run.py) and shows "DONE".
 ///
-/// Per-image time covers `embed(image:)` only (preprocessing + prediction), not the Photos fetch. Each budget's
+/// Per-image time covers `embed(image:)` only (preprocessing + prediction), not the Photos fetch. Each budget loads
+/// its own package when the bundle has one per budget (ADR-0010; `model_revisions` records each). Its
 /// functions are loaded first (`prewarm`, recorded as `load_ms` and per function as `function_ms`). Peak memory is
 /// `phys_footprint` (what iOS counts against the app's memory limit), sampled every 100 ms for the whole run. s6
 /// launches it after the `-compile` run (`CompileRunner`, ADR-0009), so its loads are warm.
@@ -75,6 +76,7 @@ final class BenchmarkRunner {
       }
       phase.loadMS = (ContinuousClock.now - t0).ms
       result.modelRevision = model!.modelRevision
+      result.modelRevisions[step.key] = model!.modelRevision
       let index = try VectorIndex(url: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
                                   dimensions: DemoModel.dimensions, modelRevision: model!.modelRevision)
       var times: [Double] = []
@@ -122,7 +124,10 @@ struct BenchmarkResult: Encodable {
   var error: String?
   var deviceModel = machine()
   var osVersion = osVersionString()
+  /// The last budget's `modelRevision` (kept for older readers; see `modelRevisions`).
   var modelRevision = ""
+  /// `modelRevision` per budget step ("70", "280"): with one package per budget (ADR-0010) each has its own.
+  var modelRevisions: [String: String] = [:]
   var photosAvailable = 0
   var budgets: [String: BudgetResult] = [:]
   var query = QueryResult(queries: 0, ms: Stats([]))
@@ -133,7 +138,8 @@ struct BenchmarkResult: Encodable {
 
   enum CodingKeys: String, CodingKey {
     case runID = "run_id", status, error, deviceModel = "device_model", osVersion = "os_version"
-    case modelRevision = "model_revision", photosAvailable = "photos_available", budgets, query
+    case modelRevision = "model_revision", modelRevisions = "model_revisions", photosAvailable = "photos_available"
+    case budgets, query
     case peakRSSMB = "peak_rss_mb", thermalState = "thermal_state", startedAt = "started_at", finishedAt = "finished_at"
   }
 

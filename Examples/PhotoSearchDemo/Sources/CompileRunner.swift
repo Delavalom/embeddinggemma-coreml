@@ -48,19 +48,29 @@ final class CompileRunner {
     done = true
   }
 
+  /// Every function of each budget's package. With one package per budget (ADR-0010) the text functions live in
+  /// both packages and compile once in each; with one 14-function package (both budgets report the same revision)
+  /// they compile once.
   private func compile(into result: inout CompileResult) async throws {
+    var compiled = Set<String>()  // "<model revision>/<function>"
     for step in BenchmarkRunner.plan {
       status = "installing the model at budget \(step.key)"
       let model = try await DemoModel.load(budget: step.budget)
       result.modelRevision = model.modelRevision
+      result.modelRevisions[step.key] = model.modelRevision
       let image = EmbeddingGemma.imageFunctions(budget: model.imageBudget)
-      for name in EmbeddingGemma.textFunctions + image where result.functionMS[name] == nil {
-        status = "compiling \(name)"
+      var stepMS: [String: Double] = [:]
+      for name in EmbeddingGemma.textFunctions + image {
+        guard compiled.insert("\(model.modelRevision)/\(name)").inserted else { continue }
+        status = "compiling \(name) (budget \(step.key))"
         let t0 = ContinuousClock.now
         try await model.prewarm([name])
-        result.functionMS[name] = (ContinuousClock.now - t0).ms
+        let ms = (ContinuousClock.now - t0).ms
+        stepMS[name] = ms
+        if result.functionMS[name] == nil { result.functionMS[name] = ms }
         await model.unloadFunctions()
       }
+      result.budgetFunctionMS[step.key] = stepMS
     }
   }
 }
@@ -72,9 +82,16 @@ struct CompileResult: Encodable {
   var error: String?
   var deviceModel = machine()
   var osVersion = osVersionString()
+  /// The last budget's `modelRevision` (kept for older readers; see `modelRevisions`).
   var modelRevision = ""
-  /// Load time per function (its first load after the install, so its compile).
+  /// `modelRevision` per budget step ("70", "280"): with one package per budget (ADR-0010) each has its own.
+  var modelRevisions: [String: String] = [:]
+  /// Load time per function name (its first load after the install, so its compile), from the first package
+  /// that has it.
   var functionMS: [String: Double] = [:]
+  /// Load time per function compiled at each budget step ("70", "280"): every function of that budget's package,
+  /// minus those an earlier step already compiled in the same package.
+  var budgetFunctionMS: [String: [String: Double]] = [:]
   /// `os_proc_available_memory()` at launch: how much more this app could use before iOS ends it.
   var availableMemoryMBAtLaunch = 0.0
   var peakRSSMB = 0.0
@@ -84,7 +101,8 @@ struct CompileResult: Encodable {
 
   enum CodingKeys: String, CodingKey {
     case runID = "run_id", status, error, deviceModel = "device_model", osVersion = "os_version"
-    case modelRevision = "model_revision", functionMS = "function_ms"
+    case modelRevision = "model_revision", modelRevisions = "model_revisions", functionMS = "function_ms"
+    case budgetFunctionMS = "budget_function_ms"
     case availableMemoryMBAtLaunch = "available_memory_mb_at_launch", peakRSSMB = "peak_rss_mb"
     case thermalState = "thermal_state", startedAt = "started_at", finishedAt = "finished_at"
   }

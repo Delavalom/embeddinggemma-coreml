@@ -17,15 +17,18 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-    # The published model folder (files.json, EmbeddingGemma2.mlpackage/, tokenizer/) that `just stage 6` writes to
-    # ./Model, copied verbatim into the bundle as `Model/`. Optional: without it the app uses the Hugging Face
-    # default model. A script rather than a folder reference, so the project builds when ./Model does not exist.
+    # The published model folder that `just stage 6` writes to ./Model: one layout per image budget in Model/b70/ and
+    # Model/b280/ (each files.json, EmbeddingGemma2.mlpackage/, tokenizer/; ADR-0010), or one 14-function layout in
+    # Model/ itself. Copied verbatim, subfolders included, into the bundle as `Model/`. Optional: without it the app
+    # uses the Hugging Face default model. A script rather than a folder reference, so the project builds when
+    # ./Model does not exist.
     postCompileScripts:
       - name: Bundle the local model
         basedOnDependencyAnalysis: false
         script: |
           dest="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Model"
-          if [ -f "$SRCROOT/Model/files.json" ]; then
+          if [ -f "$SRCROOT/Model/files.json" ] || [ -f "$SRCROOT/Model/b70/files.json" ] \
+             || [ -f "$SRCROOT/Model/b280/files.json" ]; then
             mkdir -p "$dest" && rsync -a --delete "$SRCROOT/Model/" "$dest/"
           else
             rm -rf "$dest"
