@@ -9,8 +9,10 @@ gates against the FP reference on Swift's pixels. See stages/s5_swift/README.md.
     uv run --exact --group convert python -m stages.s5_swift.run --measure <pkg> [--compute-units cpuOnly] [--limit N]
         [--skip-fp]
 
-`--measure` runs the same comparison on any package with the s5 I/O (for example the contract model of
-make_contract_model.py) and prints the metrics without writing a report. Three heavy steps, one process each, one
+The stage runs s4's two budget packages (ADR-0010; `--model <budget>=<pkg>` per budget to egcm-parity and the
+runtime, stages/s5_swift/models.py). `--measure` runs the same comparison on any one package with the s5 I/O and all
+14 functions (for example the contract model of make_contract_model.py) and prints the metrics without writing a
+report. Three heavy steps, one process each, one
 at a time: egcm-parity (Swift), stages.s5_swift.runtime (Python Core ML), stages.s5_swift.fp_reference per budget.
 """
 
@@ -22,6 +24,7 @@ import resource
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -36,10 +39,12 @@ from egcm.stage import run_stage
 from stages.s5_swift import task_level as tl
 from stages.s5_swift.compare import sha256_hwc, summarize
 from stages.s5_swift.export_fixtures import SYNTHETIC_SIZES, synthetic, torch_resize
+from stages.s5_swift.models import TEXT_BUDGET, model_args
 
 STAGE = "s5_swift"
 SWIFT = ROOT / "swift"
 GB = 1e9
+Model = Path | Mapping[int, Path]  # one package for every budget, or budget -> package (stages/s5_swift/models.py)
 
 
 def write_synthetic(folder: Path) -> dict[str, dict]:
@@ -56,10 +61,11 @@ def write_synthetic(folder: Path) -> dict[str, dict]:
     return refs
 
 
-def run_parity(model: Path, out: Path, synthetic_dir: Path, compute_units: str, limit: int,
+def run_parity(model: Model, out: Path, synthetic_dir: Path, compute_units: str, limit: int,
                tokenizer: Path | None = None, pixels: Path | None = None) -> dict:
-    """Build and run egcm-parity (release), return its JSON. `tokenizer` defaults to the verified local copy."""
-    cmd = ["swift", "run", "-c", "release", "egcm-parity", "--model", str(model),
+    """Build and run egcm-parity (release), return its JSON. `model`: one package for every budget, or budget ->
+    package (`--model <budget>=<pkg>` per budget, ADR-0010). `tokenizer` defaults to the verified local copy."""
+    cmd = ["swift", "run", "-c", "release", "egcm-parity", *model_args(model),
            "--tokenizer", str(tokenizer or published.tokenizer_source()), "--fixtures", str(FIXTURES),
            "--out", str(out), "--synthetic", str(synthetic_dir), "--compute-units", compute_units,
            "--limit", str(limit)]
@@ -137,10 +143,12 @@ def compare(parity: dict, s0: Path, synthetic_refs: dict, limit: int = 0, py: di
     return metrics | gated, details | task
 
 
-def measure(model: Path, out_dir: Path, s0: Path = S0_DIR, compute_units: str = "cpuAndNeuralEngine",
+def measure(model: Model, out_dir: Path, s0: Path = S0_DIR, compute_units: str = "cpuAndNeuralEngine",
             limit: int = 0, tokenizer: Path | None = None, skip_fp: bool = False) -> tuple[dict, dict]:
-    if not (model / "Manifest.json").is_file():
-        raise FileNotFoundError(f"{model} is not an .mlpackage: run `just stage 4`")
+    """`model`: one package for every budget (`--measure`), or budget -> package (the stage, ADR-0010)."""
+    for p in model.values() if isinstance(model, Mapping) else [model]:
+        if not (p / "Manifest.json").is_file():
+            raise FileNotFoundError(f"{p} is not an .mlpackage: run `just stage 4`")
     if limit and limit < tl.MIN_IMAGES and not skip_fp:
         raise ValueError(f"--limit {limit} is below {tl.MIN_IMAGES} images, which the top-50 ranking metrics need: "
                          "add --skip-fp")
@@ -150,8 +158,7 @@ def measure(model: Path, out_dir: Path, s0: Path = S0_DIR, compute_units: str = 
     parity = run_parity(model, parity_json, out_dir / "synthetic", compute_units, limit, tokenizer, pixels)
     rss["swift_gb"] = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / GB  # bytes on macOS
     common = ["--parity", str(parity_json), "--pixels", str(pixels)]
-    py = run_part("runtime", ["--model", str(model), "--compute-units", compute_units, *common],
-                  out_dir / "runtime.npz")
+    py = run_part("runtime", [*model_args(model), "--compute-units", compute_units, *common], out_dir / "runtime.npz")
     rss["runtime_gb"] = float(py.pop("peak_rss_bytes")) / GB
     fp = None
     if not skip_fp:
@@ -160,20 +167,29 @@ def measure(model: Path, out_dir: Path, s0: Path = S0_DIR, compute_units: str = 
             fp[b] = run_part("fp_reference", ["--budget", str(b), "--s0", str(s0), *common], out_dir / f"fp_{b}.npz")
             rss[f"fp_{b}_gb"] = float(fp[b]["peak_rss_bytes"]) / GB
     metrics, details = compare(parity, s0, refs, limit, py, fp)
-    details |= {"model": str(model), "parity_json": str(parity_json), "limit": limit, "peak_rss": rss,
+    models = {str(b): str(p) for b, p in model.items()} if isinstance(model, Mapping) else str(model)
+    # egcm-parity's own record of what it loaded: `model_revisions` per budget ("70", "280"); it embeds text with
+    # budget 70's model, as runtime.py does (models.TEXT_BUDGET)
+    details |= {"model": models, "text_budget": TEXT_BUDGET if isinstance(model, Mapping) else None,
+                "swift_model_revisions": parity.get("model_revisions"),
+                "parity_json": str(parity_json), "limit": limit, "peak_rss": rss,
                 "seconds": round(time.monotonic() - t0, 1)}
     return metrics, details
 
 
 def fill(report: Report) -> None:
-    """Runs on s4's device archive, unpacked (sha256-checked): the package and tokenizer bytes a phone gets."""
+    """Runs on s4's device archives, one per image budget, unpacked (sha256-checked) into unpacked/b<budget>/: the
+    package and tokenizer bytes a phone gets (ADR-0010). The tokenizer is the same in both; s5 uses TEXT_BUDGET's."""
     s4, out = published.shipped(), stage_dir(STAGE)
-    unpacked = manifest.unpack(s4.archive, out / "unpacked", s4.archive_sha256)
-    tokenizer = published.check_tokenizer(unpacked / published.TOKENIZER_DIR)
-    metrics, details = measure(unpacked / published.PACKAGE_NAME, out, tokenizer=tokenizer)
+    models, tokenizers = {}, {}
+    for b, v in sorted(s4.budgets.items()):
+        unpacked = manifest.unpack(v.archive, out / "unpacked" / published.budget_dir(b), v.archive_sha256)
+        tokenizers[b] = published.check_tokenizer(unpacked / published.TOKENIZER_DIR)
+        models[b] = unpacked / published.PACKAGE_NAME
+    metrics, details = measure(models, out, tokenizer=tokenizers[TEXT_BUDGET])
     report.metrics |= metrics
-    report.details |= details | {"s4_recipe": s4.recipe, "device_archive": s4.archive.name,
-                                 "device_archive_sha256": s4.archive_sha256}
+    report.details |= details | {"s4_recipe": s4.recipe, "device_archives": {
+        str(b): {"name": v.archive.name, "sha256": v.archive_sha256} for b, v in sorted(s4.budgets.items())}}
     print(json.dumps(metrics), flush=True)
 
 

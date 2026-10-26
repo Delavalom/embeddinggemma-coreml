@@ -3,10 +3,18 @@
 The Swift package on macOS: token ids and preprocessed pixels against s0, and its vectors against Python Core ML and
 the FP reference on the same inputs (ADR-0008).
 
-Run: `just stage 5` (the `convert` group). Needs fresh passing s0, s1 and s4. It runs on s4's device archive
-(`details.device_archive`, sha256 from `checksums.json`), unpacked into `artifacts/s5_swift/unpacked/`
-(`egcm.manifest.unpack`): the package and tokenizer bytes a phone downloads. Recorded as `details.s4_recipe`,
-`details.device_archive`, `details.device_archive_sha256`.
+Run: `just stage 5` (the `convert` group). Needs fresh passing s0, s1 and s4. It runs on s4's two device archives,
+one per image budget (ADR-0010; `details.budgets.<budget>.device_archive` in s4's report, sha256 from
+`checksums.json`), each unpacked into `artifacts/s5_swift/unpacked/b<budget>/` (`egcm.manifest.unpack`): the package
+and tokenizer bytes a phone downloads. Recorded as `details.s4_recipe` and `details.device_archives` (per budget:
+`name`, `sha256`).
+
+**Which package runs what** (`models.py`): egcm-parity and `runtime.py` get `--model 70=<pkg> --model 280=<pkg>`.
+Image vectors of each budget come from that budget's package. Text vectors come from budget 70's package in both
+(egcm-parity and Python Core ML; `details.text_budget`): both packages hold the same text functions, which s4 checks
+bitwise against the 14-function package. A bare `--model <pkg>` still means one 14-function package for every budget
+(`--measure`, the contract model). egcm-parity's `model_revisions` (per budget) is recorded as
+`details.swift_model_revisions`.
 
 ## What it does
 
@@ -15,7 +23,7 @@ Three heavy steps, each in its own process, one at a time (16 GB Mac). Peak RSS 
 1. `run.py` writes the synthetic pattern (`export_fixtures.synthetic`) at `SYNTHETIC_SIZES` as PNGs into
    `artifacts/s5_swift/synthetic/`, with torch's uint8 antialiased bicubic of each as the reference.
 2. **Swift.** `swift run -c release egcm-parity` (`swift/Sources/egcm-parity/`) goes through the path an app takes:
-   it puts the package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`, sha256-checked by
+   it puts each budget's package and the tokenizer (s0's HF snapshot, else `artifacts/tokenizer/<revision>/`, sha256-checked by
    `egcm.published.tokenizer_source`) in a local published folder with `files.json`, installs it with `ModelStore`
    (verify, compile) and loads `EmbeddingGemma.load(.file(...), dimensions: 768)` once per budget, on
    `.cpuAndNeuralEngine`. For every fixture text (prompt by kind: `query` or `document`) it records the token ids and
@@ -23,8 +31,8 @@ Three heavy steps, each in its own process, one at a time (16 GB Mac). Peak RSS 
    of the uint8 bucket image and 8,192 pixel values (the `export_fixtures` sampling rule), and for fixture images
    the vector. With `--pixels artifacts/s5_swift/pixels/` it also writes each fixture's whole bucket image as
    `<id>_<budget>.png` (lossless). Output: `artifacts/s5_swift/parity.json`.
-3. **Python Core ML** (`runtime.py`): the same package, compiled by coremltools, on the same compute units, one
-   function at a time. Inputs are Swift's own token ids and bucket images (read back and sha256-checked by
+3. **Python Core ML** (`runtime.py`): the same packages, compiled by coremltools one at a time, on the same compute
+   units, one function at a time. Inputs are Swift's own token ids and bucket images (read back and sha256-checked by
    `pixels.py`). Output: `runtime.npz`.
 4. **FP reference on Swift's pixels** (`fp_reference.py`, one process per budget): the s1 rewrite in FP32 on the CPU,
    for the images whose Swift bucket image is not byte-identical to s0's (the JPEGs: ImageIO decodes them, PIL
@@ -71,7 +79,7 @@ Recorded only:
 uv run --exact --group convert python -m stages.s5_swift.run --measure <pkg> [--s0 <dir>] [--compute-units cpuOnly] [--limit N] [--skip-fp]
 ```
 
-runs the same comparison on any package with the spec section 7 I/O and prints the metrics and details as JSON
+runs the same comparison on any one package with the spec section 7 I/O (all 14 functions) and prints the metrics and details as JSON
 (files go to `artifacts/s5_swift/measure/`). `--skip-fp` leaves out the FP reference and the task-level metrics. The
 ranking metrics need at least 50 images, so a `--limit` below 50 requires it. On the contract model (below), 2026-10-24, M1 Pro: ids identical for
 200/200 texts; pixels bit-exact for 60/60 PNG and 20/20 synthetic cases, so `max_pixel_abs_diff` 0; JPEG p99 2/255,
