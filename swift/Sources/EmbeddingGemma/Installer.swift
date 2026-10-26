@@ -7,8 +7,9 @@ struct Installer: Sendable {
   enum Layout: Sendable {
     /// `files.json` and every file on its own; `manifest` supplies the bytes of `files.json` instead of fetching them.
     case files(manifest: Data?)
-    /// `manifest.json` and the one archive it names (the app download).
-    case archive
+    /// `manifest.json` and the one archive it names (the app download). With a requirement, the manifest must
+    /// serve that image budget (ADR-0010).
+    case archive(BudgetRequirement?)
     /// A local folder that already holds the unpacked layout: moved in place, only the package is compiled.
     case adopt(URL)
   }
@@ -66,8 +67,8 @@ struct Installer: Sendable {
     case .files(let manifest):
       try await downloadFiles(manifest, files: files, partial: partial, repoDir: repoDir, marker: &marker)
       source = files
-    case .archive:
-      source = try await downloadArchive(files: files, partial: partial, repoDir: repoDir, marker: &marker)
+    case .archive(let requirement):
+      source = try await downloadArchive(requirement, files: files, partial: partial, repoDir: repoDir, marker: &marker)
     case .adopt(let folder):
       try adopt(folder, into: files)
       source = files
@@ -90,15 +91,20 @@ struct Installer: Sendable {
   }
 
   /// `manifest.json`, then the archive it names (resumable, size and SHA-256 checked), extracted into
-  /// `partial/unpacked` with the AppleArchive framework. Returns that folder.
-  private func downloadArchive(files: URL, partial: URL, repoDir: URL, marker: inout InstallMarker) async throws -> URL {
+  /// `partial/unpacked` with the AppleArchive framework. Returns that folder. A manifest that does not serve
+  /// `requirement`'s image budget is refused before the archive is downloaded.
+  private func downloadArchive(_ requirement: BudgetRequirement?, files: URL, partial: URL, repoDir: URL,
+                               marker: inout InstallMarker) async throws -> URL {
     let bytes = try await manifestData(named: ArchiveManifest.fileName, into: partial)
     let sha = Checksums.sha256(data: bytes)
     if let expected = expectedManifestSHA256, expected != sha {
       throw EmbeddingGemmaError.checksumMismatch(file: ArchiveManifest.fileName)
     }
     let manifest: ArchiveManifest
-    do { manifest = try ArchiveManifest.decode(bytes) } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
+    do {
+      manifest = try ArchiveManifest.decode(bytes)
+      if let r = requirement { try manifest.check(serves: r.budget, mustDeclare: r.mustDeclare) }
+    } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
     marker.filesSHA256 = sha
     try marker.write(partial)
 

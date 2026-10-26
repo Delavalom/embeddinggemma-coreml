@@ -11,6 +11,8 @@ public struct InstallProgress: Sendable, Equatable {
 /// A model revision that is downloaded, verified and compiled.
 public struct InstalledModel: Sendable, Equatable {
   public let repo: String
+  /// The install's name in the store, which is its folder name: `<commit>-b<budget>` for a Hugging Face install of
+  /// one image budget (`ensureModel(repo:revision:budget:)`, ADR-0010), else the revision it was installed as.
   public let revision: String
   /// `<root>/<repo with "/" as "--">/<revision>`.
   public let folder: URL
@@ -22,12 +24,13 @@ public struct InstalledModel: Sendable, Equatable {
 
 /// Downloads, verifies and compiles the published model into `<root>/<repo>/<revision>/`.
 ///
-/// From the Hugging Face Hub (a pinned commit) it downloads `manifest.json` (`ArchiveManifest`) and the one archive
-/// it names: an LZFSE Apple Archive of `EmbeddingGemma2.mlpackage/**` and `tokenizer/{tokenizer.json,
-/// tokenizer_config.json}`, resumable, checked against its size and SHA-256, then validated (no symlinks, no absolute
-/// or ".." paths) and extracted with the AppleArchive framework. A local folder may instead hold the plain layout,
-/// `files.json` plus those files, each checked on its own. Then the package is compiled with
-/// `MLModel.compileModel(at:)`.
+/// From the Hugging Face Hub (a pinned commit) it installs one image budget's package (ADR-0010) into
+/// `<root>/<repo>/<commit>-b<budget>/`: `b<budget>/manifest.json` (`ArchiveManifest`, which must declare that
+/// `image_budget`) and the one archive it names, an LZFSE Apple Archive of `EmbeddingGemma2.mlpackage/**` and
+/// `tokenizer/{tokenizer.json, tokenizer_config.json}`, resumable, checked against its size and SHA-256, then
+/// validated (no symlinks, no absolute or ".." paths) and extracted with the AppleArchive framework. A local folder
+/// may instead hold the plain layout, `files.json` plus those files, each checked on its own. Then the package is
+/// compiled with `MLModel.compileModel(at:)`.
 ///
 /// - Every attempt works in its own `<revision>.partial-<uuid>/` and renames it to `<revision>/` only after the
 ///   compile succeeds. Files that already verified in an earlier failed attempt of the same revision are reused.
@@ -88,8 +91,9 @@ public struct ModelStore: Sendable {
     }
   }
 
-  /// The model of `repo` at `revision` from the Hugging Face Hub: `manifest.json` and the one archive it names.
-  /// `manifestSHA256`, when given, pins `manifest.json`.
+  /// A 14-function model at the root of `repo` at `revision` (the layout before ADR-0010): `manifest.json` and the
+  /// one archive it names, installed as `revision`. `manifestSHA256`, when given, pins `manifest.json`.
+  @available(*, deprecated, message: "the model is published per image budget: use ensureModel(repo:revision:budget:)")
   public func ensureModel(repo: String, revision: String, manifestSHA256: String? = nil,
                           progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws -> InstalledModel {
     try Self.validate(repo: repo, revision: revision)
@@ -98,10 +102,11 @@ public struct ModelStore: Sendable {
   }
 
   /// The archive published at `baseURL` (https:// or file://: `manifest.json` + the archive), as `repo`/`revision`.
+  /// With `budget`, `manifest.json` must serve that image budget.
   package func ensureModel(archiveAt baseURL: URL, repo: String = "local", revision: String,
-                           manifestSHA256: String? = nil,
+                           manifestSHA256: String? = nil, budget: BudgetRequirement? = nil,
                            progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws -> InstalledModel {
-    try await install(baseURL: baseURL, repo: repo, revision: revision, layout: .archive,
+    try await install(baseURL: baseURL, repo: repo, revision: revision, layout: .archive(budget),
                       expectedSHA256: manifestSHA256, progress: progress)
   }
 
@@ -167,9 +172,14 @@ public struct ModelStore: Sendable {
     return m
   }
 
-  /// Deletes every folder this store created (complete revisions and leftover partial attempts) except `keep`
-  /// and revisions a live `EmbeddingGemma` in this process has loaded. Foreign files are never touched.
+  /// Deletes every folder this store created (complete installs and leftover partial attempts) except `keep`
+  /// and installs a live `EmbeddingGemma` in this process has loaded. Foreign files are never touched.
   /// Returns the deleted folders.
+  ///
+  /// `keep` names install folders, not commits: each image budget of a Hugging Face commit is its own install
+  /// (`<commit>-b70/`, `<commit>-b280/`), so keeping one budget's install deletes the other budget's install of the
+  /// same commit (a phone uses one budget). Pass both, e.g. from `installed(repo:revision:budget:)`, to keep both.
+  /// Installs of the layout before ADR-0010 (`<commit>/`) are deleted like any other old revision.
   @discardableResult
   public func removeRevisions(except keep: [InstalledModel] = []) async throws -> [URL] {
     guard FileManager.default.fileExists(atPath: root.path) else { return [] }

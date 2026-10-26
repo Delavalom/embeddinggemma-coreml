@@ -14,15 +14,21 @@ import ImageIO
 /// Embedding calls run concurrently: preprocessing and prediction happen off the actor, which only guards the
 /// table of loaded functions. Texts are truncated at 128 tokens (`<bos>`, 126 tokens of prompt + text, `<eos>`).
 public actor EmbeddingGemma {
+  /// Where the model comes from. The published model has one package per image budget (ADR-0010), and `load`
+  /// installs only the one for the budget it resolves.
   public enum Source: Sendable {
-    /// The published model at `revision` (a 40-character commit SHA) of `repo` (`owner/name`) on the Hugging Face Hub.
+    /// The published model at `revision` (a 40-character commit SHA) of `repo` (`owner/name`) on the Hugging Face
+    /// Hub: `b<budget>/manifest.json` and the archive it names, installed in the store as `<revision>-b<budget>`.
     case huggingFace(repo: String = EmbeddingGemma.defaultRepo, revision: String)
     /// A local folder with the plain layout (`files.json`, `EmbeddingGemma2.mlpackage/`, `tokenizer/`), or with
-    /// `manifest.json` and the archive it names. Copied into the store (needs about 3x the files in free space).
+    /// `manifest.json` and the archive it names: `folder/b<budget>/` when that folder exists (one package per
+    /// budget), else `folder` itself (a package with every budget). Copied into the store (needs about 3x the files
+    /// in free space).
     case file(URL)
-    /// An unpacked, already verified layout (`EmbeddingGemma2.mlpackage/`, `tokenizer/`), e.g. the app archive the
-    /// caller downloaded, checked and extracted. Moved into the store as `repo`/`revision`, not copied: it must be
-    /// on the store's volume and needs free space for the compiled model only (`ModelStore.adopt`).
+    /// An unpacked, already verified layout (`EmbeddingGemma2.mlpackage/`, `tokenizer/`) of the budget being loaded,
+    /// e.g. the app archive the caller downloaded, checked and extracted. Moved into the store as `repo`/`revision`,
+    /// not copied: it must be on the store's volume and needs free space for the compiled model only
+    /// (`ModelStore.adopt`).
     case installed(URL, repo: String = EmbeddingGemma.defaultRepo, revision: String)
   }
 
@@ -46,8 +52,8 @@ public actor EmbeddingGemma {
     Bucket.all.filter { $0.budget == budget }.map(\.functionName)
   }
 
-  /// The Hugging Face commit SHA of the model (`file-<sha256 prefix of files.json>` for `.file`). Index files store
-  /// it so vectors from different models are never mixed.
+  /// The Hugging Face commit SHA of the model (`file-<sha256 prefix of files.json>` of the folder used for `.file`).
+  /// Index files store it, with `imageBudget`, so vectors from different models are never mixed.
   public nonisolated let modelRevision: String
   /// Soft tokens per image: 70 or 280.
   public nonisolated let imageBudget: Int
@@ -63,9 +69,9 @@ public actor EmbeddingGemma {
   /// One loaded function per name, loaded on first use or by `prewarm`.
   private var functions: [String: Task<LoadedFunction, any Error>] = [:]
 
-  private init(installed: InstalledModel, encoder: TextEncoder, budget: Int, dimensions: Int,
+  private init(installed: InstalledModel, revision: String, encoder: TextEncoder, budget: Int, dimensions: Int,
                computeUnits: MLComputeUnits) throws {
-    modelRevision = installed.revision
+    modelRevision = revision
     compiledModel = installed.compiledModel
     lease = RevisionLease(installed.folder)
     self.encoder = encoder
@@ -75,43 +81,21 @@ public actor EmbeddingGemma {
     self.computeUnits = computeUnits
   }
 
-  /// Downloads (or reuses), verifies and compiles the model, and loads the tokenizer. Model functions are loaded
-  /// lazily on the first embedding that needs them, or up front with `prewarm`. `progress` is called on an
-  /// arbitrary thread.
+  /// Resolves the image budget, then downloads (or reuses), verifies and compiles that budget's package, and loads
+  /// the tokenizer (see `Source` for what each source installs). Model functions are loaded lazily on the first
+  /// embedding that needs them, or up front with `prewarm`. `progress` is called on an arbitrary thread.
   public static func load(_ source: Source, budget: ImageBudget = .auto, dimensions: Int = 256,
                           store: ModelStore = ModelStore(), computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
                           progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws -> EmbeddingGemma {
     guard (1...maxDimensions).contains(dimensions) else { throw EmbeddingGemmaError.invalidDimensions(dimensions) }
-    let installed: InstalledModel
-    switch source {
-    case .huggingFace(let repo, let revision):
-      let pinned = repo == defaultRepo && revision == defaultRevision ? defaultManifestSHA256 : nil
-      installed = try await store.ensureModel(repo: repo, revision: revision, manifestSHA256: pinned,
-                                              progress: progress)
-    case .installed(let folder, let repo, let revision):
-      installed = try await store.adopt(folder: folder, repo: repo, revision: revision)
-    case .file(let folder):
-      let files = folder.appending(path: FilesManifest.fileName), archived = folder.appending(path: ArchiveManifest.fileName)
-      if !FileManager.default.fileExists(atPath: files.path), FileManager.default.fileExists(atPath: archived.path) {
-        let bytes: Data
-        do { bytes = try Data(contentsOf: archived) } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
-        let revision = "file-" + Checksums.sha256(data: bytes).prefix(16)
-        installed = try await store.ensureModel(archiveAt: folder, repo: "local", revision: revision,
-                                                manifestSHA256: Checksums.sha256(data: bytes), progress: progress)
-      } else {
-        let bytes: Data
-        do { bytes = try Data(contentsOf: files) } catch { throw EmbeddingGemmaError.downloadFailed(underlying: error) }
-        let revision = "file-" + Checksums.sha256(data: bytes).prefix(16)  // hash and parse the same bytes
-        installed = try await store.ensureModel(baseURL: folder, repo: "local", revision: revision, manifest: bytes,
-                                                progress: progress)
-      }
-    }
+    let resolved = budget.resolved
+    let (installed, revision) = try await install(source, budget: resolved, store: store, progress: progress)
     let encoder: TextEncoder
     do { encoder = try await TextEncoder(tokenizerFolder: installed.tokenizer) } catch let e as EmbeddingGemmaError {
       throw e
     } catch { throw EmbeddingGemmaError.modelLoadFailed(underlying: error) }
-    return try EmbeddingGemma(installed: installed, encoder: encoder, budget: budget.resolved, dimensions: dimensions,
-                              computeUnits: computeUnits)
+    return try EmbeddingGemma(installed: installed, revision: revision, encoder: encoder, budget: resolved,
+                              dimensions: dimensions, computeUnits: computeUnits)
   }
 
   /// Normalized, `dimensions` long. `orientation` is the EXIF orientation of `image` (photos often need it).

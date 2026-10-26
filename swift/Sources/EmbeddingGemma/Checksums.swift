@@ -35,6 +35,26 @@ package enum ManifestError: Error, Equatable {
   case duplicatePath(String)
   case badHash(String)
   case missing(String)
+  /// `image_budget` in `manifest.json` is not 70 or 280.
+  case unsupportedImageBudget(Int)
+  /// `manifest.json` declares another image budget (or none, where a per-budget package was expected).
+  case imageBudgetMismatch(expected: Int, found: Int?)
+}
+
+extension ManifestError: LocalizedError {
+  package var errorDescription: String? {
+    switch self {
+    case .unsafePath(let p): "the manifest lists an unsafe path \"\(p)\""
+    case .reservedName(let p): "the manifest lists a reserved name \"\(p)\""
+    case .duplicatePath(let p): "the manifest lists \"\(p)\" twice"
+    case .badHash(let p): "the manifest has an invalid size or SHA-256 for \"\(p)\""
+    case .missing(let p): "\"\(p)\" is missing"
+    case .unsupportedImageBudget(let b): "manifest.json declares image_budget \(b); only 70 and 280 exist"
+    case .imageBudgetMismatch(let want, let got):
+      "manifest.json " + (got.map { "declares image_budget \($0)" } ?? "declares no image_budget")
+        + ", but the image budget \(want) package was requested"
+    }
+  }
 }
 
 /// `files.json`: the list of files in a published model folder (the uncompressed `.mlpackage` and the tokenizer),

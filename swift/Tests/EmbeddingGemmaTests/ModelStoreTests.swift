@@ -269,7 +269,7 @@ func expectError(_ body: () async throws -> Void, _ check: (EmbeddingGemmaError)
                     ("name", String(repeating: "a", count: 40)), ("a/b/c", String(repeating: "a", count: 40)),
                     ("org/na me", String(repeating: "a", count: 40))])
   func huggingFaceSourcesAreValidated(repo: String, revision: String) async {
-    await expectError({ _ = try await store().ensureModel(repo: repo, revision: revision) }) {
+    await expectError({ _ = try await store().ensureModel(repo: repo, revision: revision, budget: 70) }) {
       if case .invalidSource = $0 { true } else { false }
     }
   }
