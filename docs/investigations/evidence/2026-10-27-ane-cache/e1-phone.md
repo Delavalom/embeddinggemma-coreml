@@ -84,3 +84,23 @@ for 10 min. Every relaunch after a deletion was cold (45.9, 45.7 s); every relau
 Thermal state 2 (serious) through every A. Cold-compile failures: 4 of 27 (15%), all 41–49 s into the load, at
 14.9–28 GB free. Every function that compiled was warm on relaunch (16/16 in r1-B and r3-B); every function that
 failed in A compiled cold on relaunch (2/2). One milhash folder per function load (9 for 9 functions).
+
+## E1f — immediate in-process retry after a failed cold compile (fresh install per round, all 9 b70 functions, `-retries 3`, no pause between tries)
+
+Raw data: `~/egcm-evidence-raw/2026-10-27/e1f-r{1,2,3}/`, console `e1f-console.txt`. Rounds 5 min apart, ample free space.
+
+| Round | Start (UTC) | Free (Mac measure) MB | Failed on try 1 (s into the load) | Try 2 | Peak MB | Thermal |
+|---|---|---|---|---|---|---|
+| r1 | 22:35 | 18,976→14,741 | image_70_landscape (45.0), image_70_wide (44.9) | ok 128.8, ok 126.5 | 1,207 | 0→2 |
+| r2 | 22:56 | — | text_16 (32.0), image_70_portrait (42.2), image_70_wide (45.0) | ok 71.8, ok 129.1, ok 125.4 | 1,315 | 0→2 |
+| r3 | 23:21 | 15,400→12,235 | image_70_portrait (44.9), image_70_square (44.9) | ok 132.0, ok 128.6 | 1,242 | 0→2 |
+
+- **7 of 27 cold compiles failed on the first try with the `functionName` error; 7 of 7 loaded on the immediate second
+  try** in the same process. No function needed a third try. Every round ended with 9/9 bundles holding files.
+- The failures came 32–45 s into the load, the same signature as E1d (41–49 s) and the jetsam/Code=1 log evidence.
+- Peak memory 1,207–1,315 MB, reached at the first load of each launch, which also compiled the `.mlmodelc`
+  (10.3–10.9 s). E1d's fresh-install launches peaked the same way (1,261–1,318 MB); relaunches that only load were
+  576 MB (warm) to 814 MB (one cold compile). So the first launch after install is over the 800 MB gate; this is
+  not new in E1f.
+- Consequence: the package's existing retry (`FunctionLoad.withRetries`, 3 tries, backoff and thermal wait) covers this
+  failure; the probe shows that even an immediate retry is enough in 7/7 cases.
