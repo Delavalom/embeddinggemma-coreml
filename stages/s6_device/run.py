@@ -52,11 +52,12 @@ MAX_WARM_LOAD_MS = 30_000
 # plus the cooldown before a retry (FunctionLoad.cooldown). The benchmark keeps device.TIMEOUT_SECONDS.
 COMPILE_TIMEOUT_SECONDS = 120 * 60
 # A failed compile run is relaunched (a new process; functions already compiled stay cached and load warm), up to
-# this many launches, after a pause for the phone to cool. On iOS 27.0.1 a hot phone failed one Neural Engine compile
-# three times in a row within one process, even with FunctionLoad's cooldown; Roll compiles across launches the same
-# way. The cold-compile gate takes the highest peak over the launches.
-COMPILE_LAUNCHES = 3
-COMPILE_RELAUNCH_PAUSE_SECONDS = 180
+# this many launches. On iOS 27.0.1 a process that fails a Neural Engine compile keeps failing it (three tries, even
+# with FunctionLoad's cooldown), at thermal "serious" after 12 functions and at "fair" after 2; a new process got
+# past it. Roll compiles across launches the same way. The cold-compile gate takes the highest peak over the
+# launches. The pause is short: the app has exited, so nothing keeps the phone from locking.
+COMPILE_LAUNCHES = 5
+COMPILE_RELAUNCH_PAUSE_SECONDS = 15
 
 
 def log(msg: str) -> None:
