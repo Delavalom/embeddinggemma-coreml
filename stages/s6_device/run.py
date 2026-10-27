@@ -258,11 +258,12 @@ def bundle(args: argparse.Namespace, out: Path) -> tuple[dict[str, str], dict]:
 
 
 def check_revisions(result: dict, expected: dict[str, str]) -> None:
-    """Both launches must report, per budget, the model this run bundled (`model_revisions`: budget -> revision)."""
+    """Both launches must report, for the budget(s) the device ran, the model this run bundled (`model_revisions`:
+    budget -> revision). A device runs its own budget only (`ImageBudget.auto`, ADR-0010), so one of the two."""
     for run, revisions in (("benchmark", result.get("model_revisions")),
                            ("compile", result.get("compile", {}).get("model_revisions"))):
-        if revisions != expected:
-            raise RuntimeError(f"the {run} ran models {revisions!r}, expected {expected!r}")
+        if not revisions or any(expected.get(b) != rev for b, rev in revisions.items()):
+            raise RuntimeError(f"the {run} ran models {revisions!r}, expected a subset of {expected!r}")
 
 
 def make_fill(args: argparse.Namespace):

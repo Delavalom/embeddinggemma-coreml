@@ -17,9 +17,11 @@ import UIKit
 @MainActor @Observable
 final class BenchmarkRunner {
   static let resultURL = URL.documentsDirectory.appending(path: "s6_device.json")
-  static let plan: [(budget: EmbeddingGemma.ImageBudget, key: String, count: Int)] = [
-    (.tokens70, "70", 1_000), (.tokens280, "280", 200),
-  ]
+  /// This device's own budget only (`ImageBudget.auto`: 280 on A17 Pro and newer, 70 otherwise), the one package it
+  /// ships with (ADR-0010). Compiling both budgets' 18 functions on one iPhone 13 Pro Max (iOS 27.0.1, 5.4 GB of
+  /// compiled cache) made iOS evict the first ones within minutes, so the benchmark's loads were compiles again.
+  static let plan: [(budget: EmbeddingGemma.ImageBudget, key: String, count: Int)] =
+    EmbeddingGemma.ImageBudget.auto.resolved == 280 ? [(.tokens280, "280", 200)] : [(.tokens70, "70", 1_000)]
   static let queries = [
     "a dog", "receipts", "screenshot of a chat", "sunset at the beach", "birthday cake", "a car", "food on a plate",
     "people smiling", "mountains", "a document with text", "a cat sleeping", "city at night", "flowers", "a selfie",
@@ -91,7 +93,7 @@ final class BenchmarkRunner {
       phase.images = times.count
       phase.msPerImage = Stats(times)
       phase.thermalStateAfter = ProcessInfo.processInfo.thermalState.name
-      if step.key == "70" {
+      do {  // the queries run against this budget's index
         status = "queries"
         var qtimes: [Double] = []
         for q in Self.queries {

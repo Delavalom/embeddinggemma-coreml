@@ -1,6 +1,6 @@
 # s6_device
 
-PhotoSearchDemo's benchmark on a real iPhone: speed per image at both budgets, speed per query, peak memory and
+PhotoSearchDemo's benchmark on a real iPhone: speed per image at the phone's own budget, speed per query, peak memory and
 the thermal state after 1,000 images.
 
 Run: `just stage 6` with an iPhone connected (USB or the same network), unlocked, trusted, with Developer Mode on.
@@ -55,7 +55,7 @@ only its budget's.
 4. `devicectl device install app` (installing a new build discards the on-device compiles), then two launches,
    each `devicectl device process launch --console --terminate-existing <bundle> -- <mode> -runID <uuid>` (console
    in `artifacts/s6_device/console_<model><mode>.log`):
-   - `-compile` (`CompileRunner.swift`): installs both budgets' models and loads every function of each package, one
+   - `-compile` (`CompileRunner.swift`): installs the phone's budget's model and loads every function of its package, one
      at a time, releasing each (the text functions twice, once per package). Writes `Documents/s6_compile.json`: peak, load time per function, thermal state, and
      `os_proc_available_memory()` at launch.
    - If the compile run fails, it is relaunched after a 15-second pause, up to 5 launches (`COMPILE_LAUNCHES`):
@@ -69,8 +69,12 @@ only its budget's.
    message; the app exiting without a result fails too. The stage fails if either run used another model, or if
    a benchmark function load took over 30 s (a compile the compile run did not cache).
 
-The benchmark (`BenchmarkRunner.swift`): the newest 1,000 photos (960 px from `PHImageManager`) at budget 70, the
-20 queries against them, then the newest 200 at budget 280. Times cover `embed(image:)` only (preprocessing and
+The benchmark (`BenchmarkRunner.swift`) runs the phone's own budget only (`ImageBudget.auto`: 280 on A17 Pro and
+newer, 70 otherwise), the one package that phone ships with: the newest 1,000 photos (960 px from `PHImageManager`)
+at budget 70, or the newest 200 at budget 280, then the 20 queries against them. Both packages are bundled, but
+compiling all 18 functions on one iPhone 13 Pro Max (5.4 GB of compiled cache, iOS 27.0.1) made iOS evict the first
+ones within minutes, so the benchmark's loads were compiles again. The other budget is measured on a phone of its
+tier. Times cover `embed(image:)` only (preprocessing and
 prediction, not the Photos fetch), after `prewarm()` (recorded as `load_ms`). The device name is not recorded.
 
 After a run, keep the result: `python -m scripts.save_result s6_device` (writes `docs/results/s6_<model>.json` with

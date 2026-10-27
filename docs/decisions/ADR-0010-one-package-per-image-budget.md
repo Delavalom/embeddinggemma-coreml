@@ -26,7 +26,7 @@ and one device archive per budget.
 - s4 checks that the split changed nothing: every function of each budget package gives the same output as the
   14-function package on the same input (`.cpuOnly`, bitwise).
 - s5 runs the Swift package and Python Core ML on the two budget packages (the bytes a phone gets), so its gates
-  cover the split end to end. s6 bundles both and benchmarks each budget with its own package.
+  cover the split end to end. s6 bundles both and benchmarks the phone's own budget with its package (amended 2026-10-27: compiling both budgets on one iPhone 13 Pro Max made iOS evict the first compiles; see the s6 README).
 
 ## Published layout (the contract between Python, Swift and Roll)
 

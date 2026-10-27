@@ -183,7 +183,7 @@ def test_fill_rejects_another_models_result(tmp_path, monkeypatch):
     other = {"70": "file-other", "280": "file-other"}
     monkeypatch.setattr(s6, "benchmark", lambda d, app, out, ctl: result() | {"model_revisions": other})
     fill = s6.make_fill(s6.argparse.Namespace(package=str(pkg), device=None))
-    with pytest.raises(RuntimeError, match="expected \\{'70': 'file-"):
+    with pytest.raises(RuntimeError, match="expected a subset of \\{'70': 'file-"):
         fill(Report(stage="s6_device"))
 
     entries = json.loads((tmp_path / "Model" / "files.json").read_text())

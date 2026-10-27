@@ -73,8 +73,10 @@ def test_s6_package_override_bundles_it_flat_for_both_budgets(tmp_path, monkeypa
 def test_s6_checks_each_budgets_revision_in_both_launches():
     want = {"70": "file-aaaa", "280": "file-bbbb"}
     s6.check_revisions({"model_revisions": want, "compile": {"model_revisions": want}}, want)
+    one = {"70": "file-aaaa"}  # a device runs its own budget only
+    s6.check_revisions({"model_revisions": one, "compile": {"model_revisions": one}}, want)
     with pytest.raises(RuntimeError, match="the benchmark ran models"):
-        s6.check_revisions({"model_revisions": {"70": "file-aaaa"}, "compile": {"model_revisions": want}}, want)
+        s6.check_revisions({"model_revisions": {"70": "file-bbbb"}, "compile": {"model_revisions": want}}, want)
     with pytest.raises(RuntimeError, match="the compile ran models None"):
         s6.check_revisions({"model_revisions": want, "compile": {"model_revision": "file-aaaa"}}, want)
 
