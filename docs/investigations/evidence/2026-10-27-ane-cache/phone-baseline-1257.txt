@@ -19,3 +19,7 @@ AmountDataAvailable 3.34 / 3.20 GB; TotalDataAvailable 76.05 / 75.91 GB; AmountR
 #   123.76 GB of 128 GB used. iOS 27.54 GB. System Data 26.94 GB. WhatsApp 24.66 GB, iCloud Drive 9.09 GB, Photos 7.9 GB,
 #   Instagram 1.38 GB, Notion 1.02 GB, then apps of 0.5-0.6 GB. "Offload Unused Apps" would free 3.91 GB.
 # Open: what TotalDataAvailable (76 GB) counts; it doesn't match Settings' ~4.2 GB free. What is in System Data (26.94 GB).
+
+# 13:13-13:18 drift with nothing running: AmountDataAvailable 3.192 -> 3.155 GB (-37 MB in 5 min).
+# Founder freed space (~13:20). 13:23:12: AmountDataAvailable 8.99 GB; TotalDataAvailable 75.86 GB.
+# => TotalDataAvailable did not move when 5.8 GB was freed; it does not track free space. Use AmountDataAvailable.
