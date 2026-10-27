@@ -29,3 +29,23 @@ space was lower.
 - So, with plenty of free space, on iOS 27.0.1: H1 (files removed with no pressure) and H3 (key changes per launch) were
   not seen at this scale (1 function, ~16 min). Still to do: H2 directly (low free space), longer gaps and a reboot
   (E1b), and 9 functions (E1d).
+
+## App update (install over the r3 install, data kept) — one run
+
+| tag | args | since last (s) | free mac MB | load ms | key | notes |
+|---|---|---|---|---|---|---|
+| e1e-update | b70 ne text_16 | 533 | 17,951→17,732 | **46,173 (cold)** | 2 keys added (new milhash + bundle); the old entry kept its files | data container moved CDA56F26… → A99077F9…; `b70.mlmodelc` files unchanged (same inodes, mtimes) |
+
+The key changed after an update that changed only the container path and the app binary. The model files were byte-
+and inode-identical. Which of the two (path or binary) feeds the key: test with `-from tmp` (same binary, new path).
+Whether an App Store update moves the container the way `devicectl install` does: open.
+
+## E1e — low free space, one variable (founder approved 14:4x)
+
+| tag | step | free mac MB | cache (bundles / with files) | load ms | notes |
+|---|---|---|---|---|---|
+| e1e-r1-fill | `-fill 16200` (non-purgeable, Documents/filler.bin) | 17,730→1,536 | 2/2 | — | app's "important usage" free: 12,163 MB, so about 10.6 GB was purgeable |
+| e1e-r1-w | 7 listings, 1 min apart, app closed | 1,536→1,312→**10,592** (14:56–14:57) | 2/2 throughout | — | iOS purged ~9 GB of *other* data; filler intact (16.98 GB); our files spared |
+| e1e-r1-fill2 | `-fill 9024` | 10,572→2,255 | 2/2 | — | app free 3,474 → only ~1.2 GB purgeable left |
+| e1e-r1-w2 | 8 listings, 1 min apart, app closed | 2,255→1,938→2,331→3,017 | **2/2 → 0/2 between 15:02:05 and 15:03:06** | — | iOS deleted the files of both our finished entries with our app not running |
+| e1e-r1-B | b70 ne text_16 | 3,010→2,494 | 1/2 after | **45,910 (cold)** | same key (none added); recompiled into it; no `functionName` error |
