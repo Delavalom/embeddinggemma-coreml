@@ -19,16 +19,28 @@ import Testing
     }
   }
 
+  static func noPause(_: Int) async throws {}
+
+  @Test func pausesBeforeEachRetryOnly() async throws {
+    let loader = Loader(failures: 10), pauses = Mutex<[Int]>([])
+    await #expect(throws: Flaky.self) {
+      try await FunctionLoad.withRetries(computeUnits: .cpuAndNeuralEngine, pause: { n in pauses.withLock { $0.append(n) } }) {
+        try loader.load()
+      }
+    }
+    #expect(pauses.withLock { $0 } == [1, 2])  // none after the last attempt
+  }
+
   @Test func neuralEngineLoadSucceedsAfterTwoFailures() async throws {
     let loader = Loader(failures: 2)
-    let attempt = try await FunctionLoad.withRetries(computeUnits: .cpuAndNeuralEngine) { try loader.load() }
+    let attempt = try await FunctionLoad.withRetries(computeUnits: .cpuAndNeuralEngine, pause: Self.noPause) { try loader.load() }
     #expect(attempt == 3)
   }
 
   @Test func neuralEngineLoadGivesUpAfterThreeAttempts() async {
     let loader = Loader(failures: 10)
     await #expect(throws: Flaky.self) {
-      try await FunctionLoad.withRetries(computeUnits: .all) { try loader.load() }
+      try await FunctionLoad.withRetries(computeUnits: .all, pause: Self.noPause) { try loader.load() }
     }
     #expect(loader.calls.withLock { $0 } == FunctionLoad.attempts)
   }
@@ -36,7 +48,7 @@ import Testing
   @Test func cpuOnlyLoadIsNotRetried() async {
     let loader = Loader(failures: 1)
     await #expect(throws: Flaky.self) {
-      try await FunctionLoad.withRetries(computeUnits: .cpuOnly) { try loader.load() }
+      try await FunctionLoad.withRetries(computeUnits: .cpuOnly, pause: Self.noPause) { try loader.load() }
     }
     #expect(loader.calls.withLock { $0 } == 1)
   }
@@ -44,7 +56,7 @@ import Testing
   @Test func cancellationIsNotRetried() async {
     let calls = Mutex(0)
     await #expect(throws: CancellationError.self) {
-      try await FunctionLoad.withRetries(computeUnits: .cpuAndNeuralEngine) { () throws -> Int in
+      try await FunctionLoad.withRetries(computeUnits: .cpuAndNeuralEngine, pause: Self.noPause) { () throws -> Int in
         calls.withLock { $0 += 1 }
         throw CancellationError()
       }
