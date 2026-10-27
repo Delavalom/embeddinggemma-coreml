@@ -11,3 +11,11 @@ TotalDiskCapacity: 128000000000
 TotalSystemAvailable: 0
 TotalSystemCapacity: 8368590848
 # Founder (Settings): < 4 GB available. iOS 27.0.1 24A446. App container before uninstall: 26 E5 key folders, 0 finished bundles with payload (~/egcm-evidence-raw/2026-10-27/listing-pre-uninstall.json).
+
+# After a restart (founder, ~13:00). ideviceinfo disk_usage at 13:11:59 / 13:13:26:
+AmountDataAvailable 3.34 / 3.20 GB; TotalDataAvailable 76.05 / 75.91 GB; AmountRestoreAvailable 11.92 / 11.78 GB
+# => the restart freed nothing (3.23 GB before, 3.20-3.34 GB after).
+# Settings > iPhone Storage at 13:02-13:03 (founder's screenshots):
+#   123.76 GB of 128 GB used. iOS 27.54 GB. System Data 26.94 GB. WhatsApp 24.66 GB, iCloud Drive 9.09 GB, Photos 7.9 GB,
+#   Instagram 1.38 GB, Notion 1.02 GB, then apps of 0.5-0.6 GB. "Offload Unused Apps" would free 3.91 GB.
+# Open: what TotalDataAvailable (76 GB) counts; it doesn't match Settings' ~4.2 GB free. What is in System Data (26.94 GB).
