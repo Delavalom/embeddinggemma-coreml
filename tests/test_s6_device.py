@@ -243,3 +243,32 @@ def test_build_command_is_release_for_the_device():
     cmd = s6.build_command("UDID1", Path("/tmp/dd"))
     assert cmd[cmd.index("-destination") + 1] == "id=UDID1"
     assert cmd[cmd.index("-configuration") + 1] == "Release" and "-allowProvisioningUpdates" in cmd
+
+
+def test_compile_all_relaunches_after_a_failure_and_merges(tmp_path, monkeypatch):
+    calls = []
+    first = {"run_id": "a", "status": "error", "peak_rss_mb": 1500.0, "function_ms": {"f1": 40_000.0}}
+
+    def launch(device, out, ctl, mode, source, timeout):
+        calls.append(mode)
+        if len(calls) == 1:
+            (out / "s6_compile.json").write_text(json.dumps(first))
+            raise RuntimeError("the app failed on the device (Documents/s6_compile.json): flaky")
+        return {"run_id": "b", "status": "done", "peak_rss_mb": 900.0, "function_ms": {"f1": 300.0, "f2": 50_000.0}}
+
+    monkeypatch.setattr(s6, "launch", launch)
+    pauses = []
+    r = s6.compile_all(None, tmp_path, None, pause=pauses.append)
+    assert calls == ["-compile", "-compile"] and pauses == [s6.COMPILE_RELAUNCH_PAUSE_SECONDS]
+    assert r["peak_rss_mb"] == 1500.0 and r["launches"] == 2 and r["status"] == "done"
+    assert r["function_ms"] == {"f1": 40_000.0, "f2": 50_000.0}  # each function's cold time
+    assert len(r["launch_errors"]) == 1
+
+
+def test_compile_all_gives_up_after_the_last_launch(tmp_path, monkeypatch):
+    def launch(*a, **k):
+        raise RuntimeError("flaky")
+
+    monkeypatch.setattr(s6, "launch", launch)
+    with pytest.raises(RuntimeError, match="failed in 3 launches"):
+        s6.compile_all(None, tmp_path, None, pause=lambda _: None)

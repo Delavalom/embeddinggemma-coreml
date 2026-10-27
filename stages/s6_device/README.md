@@ -58,6 +58,10 @@ only its budget's.
    - `-compile` (`CompileRunner.swift`): installs both budgets' models and loads every function of each package, one
      at a time, releasing each (the text functions twice, once per package). Writes `Documents/s6_compile.json`: peak, load time per function, thermal state, and
      `os_proc_available_memory()` at launch.
+   - If the compile run fails, it is relaunched after a 3-minute pause, up to 3 launches (`COMPILE_LAUNCHES`):
+     functions it already compiled stay cached. On iOS 27.0.1 a hot phone failed one Neural Engine compile three
+     times within one process. `max_cold_compile_peak_mb` is the highest peak over the launches; the report keeps
+     `launches` and `launch_errors`.
    - `-benchmark` (`BenchmarkRunner.swift`, below). Writes `Documents/s6_device.json`.
 5. For each launch, polls `devicectl device copy from --domain-type appDataContainer --source <file>` every 15 s
    for up to 30 min. Only a file with this run's `run_id` counts; `status: error` fails at once with the app's

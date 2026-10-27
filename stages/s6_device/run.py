@@ -17,7 +17,9 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from egcm import manifest, published
@@ -49,6 +51,12 @@ MAX_WARM_LOAD_MS = 30_000
 # The compile run: 18 cold compiles (4 text + 5 image per budget package), 45-240 s each on the iPhone 13 Pro Max,
 # plus the cooldown before a retry (FunctionLoad.cooldown). The benchmark keeps device.TIMEOUT_SECONDS.
 COMPILE_TIMEOUT_SECONDS = 120 * 60
+# A failed compile run is relaunched (a new process; functions already compiled stay cached and load warm), up to
+# this many launches, after a pause for the phone to cool. On iOS 27.0.1 a hot phone failed one Neural Engine compile
+# three times in a row within one process, even with FunctionLoad's cooldown; Roll compiles across launches the same
+# way. The cold-compile gate takes the highest peak over the launches.
+COMPILE_LAUNCHES = 3
+COMPILE_RELAUNCH_PAUSE_SECONDS = 180
 
 
 def log(msg: str) -> None:
@@ -115,10 +123,44 @@ def benchmark(device: Device, app: Path, out: Path, ctl: Devicectl | None = None
     log(f"installing on {device.marketing_name} ({device.product_type}, iOS {device.os_version})")
     ctl.install(device, app)
     log("compiling every function (minutes on a fresh install)")
-    compiled = launch(device, out, ctl, "-compile", COMPILE_RESULT_FILE, COMPILE_TIMEOUT_SECONDS)
+    compiled = compile_all(device, out, ctl)
     log("benchmarking. Tap Allow Full Access on the phone if it asks for Photos (first run only)")
     result = launch(device, out, ctl, "-benchmark", RESULT_FILE)
     return result | {"compile": compiled}
+
+
+def compile_all(device: Device, out: Path, ctl: Devicectl, launches: int = COMPILE_LAUNCHES,
+                pause: Callable[[float], None] = time.sleep) -> dict:
+    """The `-compile` run, relaunched after a failure up to `launches` times. Returns the successful run's result
+    with `peak_rss_mb` the highest over every launch, `function_ms` the first (cold) time per function, `launches`
+    and `launch_errors`. A timeout is not retried."""
+    tries: list[dict] = []
+    partial = out / Path(COMPILE_RESULT_FILE).name
+    for n in range(1, launches + 1):
+        try:
+            r = launch(device, out, ctl, "-compile", COMPILE_RESULT_FILE, COMPILE_TIMEOUT_SECONDS)
+        except RuntimeError as e:
+            failed = json.loads(partial.read_text()) if partial.is_file() else {}
+            tries.append(failed | {"error": str(e)})
+            if n == launches:
+                raise RuntimeError(f"the compile run failed in {launches} launches; last: {e}") from e
+            log(f"compile launch {n} failed ({e}); relaunching in {COMPILE_RELAUNCH_PAUSE_SECONDS} s")
+            pause(COMPILE_RELAUNCH_PAUSE_SECONDS)
+            continue
+        tries.append(r)
+        return merge_compile_runs(tries)
+    raise AssertionError("unreachable")
+
+
+def merge_compile_runs(tries: list[dict]) -> dict:
+    """The last (successful) run, with the peak over all and each function's first recorded time."""
+    first: dict[str, float] = {}
+    for t in tries:
+        for name, ms in t.get("function_ms", {}).items():
+            first.setdefault(name, ms)
+    peaks = [p for t in tries if (p := t.get("peak_rss_mb")) is not None]
+    return tries[-1] | {"peak_rss_mb": max(peaks) if peaks else None, "function_ms": first, "launches": len(tries),
+                        "launch_errors": [t["error"] for t in tries if "error" in t]}
 
 
 def cold_loads(result: dict, limit_ms: float = MAX_WARM_LOAD_MS) -> list[str]:
