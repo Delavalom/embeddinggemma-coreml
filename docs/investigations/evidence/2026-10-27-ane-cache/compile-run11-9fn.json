@@ -1,0 +1,41 @@
+{
+  "available_memory_mb_at_launch" : 3060.717155456543,
+  "budget_function_ms" : {
+    "70" : {
+      "embed_image_70_landscape" : 298549.25175,
+      "embed_image_70_portrait" : 146816.122167,
+      "embed_image_70_square" : 324506.476958,
+      "embed_image_70_tall" : 145704.530208,
+      "embed_image_70_wide" : 130015.32875,
+      "embed_text_128" : 61918.007208,
+      "embed_text_16" : 112586.443167,
+      "embed_text_32" : 92913.722125,
+      "embed_text_64" : 65434.90225
+    }
+  },
+  "device_model" : "iPhone14,3",
+  "finished_at" : "2026-10-27T15:36:54Z",
+  "free_disk_mb_at_launch" : 4744.625024795532,
+  "function_ms" : {
+    "embed_image_70_landscape" : 298549.25175,
+    "embed_image_70_portrait" : 146816.122167,
+    "embed_image_70_square" : 324506.476958,
+    "embed_image_70_tall" : 145704.530208,
+    "embed_image_70_wide" : 130015.32875,
+    "embed_text_128" : 61918.007208,
+    "embed_text_16" : 112586.443167,
+    "embed_text_32" : 92913.722125,
+    "embed_text_64" : 65434.90225
+  },
+  "min_free_disk_mb" : 3150.996503829956,
+  "model_revision" : "file-99a7d34084f9186b",
+  "model_revisions" : {
+    "70" : "file-99a7d34084f9186b"
+  },
+  "os_version" : "27.0.1",
+  "peak_rss_mb" : 1508.3000946044922,
+  "run_id" : "36d441e76e7547a8846f06ba14d72983",
+  "started_at" : "2026-10-27T15:13:53Z",
+  "status" : "done",
+  "thermal_state" : "serious"
+}

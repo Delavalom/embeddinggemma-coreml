@@ -1,0 +1,81 @@
+== t70 cold
+pid 27266 start footprint=1MB
+loaded embed_text_16 68604ms footprint=503MB peak=1902MB
+released embed_text_16 footprint=503MB
+loaded embed_text_32 64309ms footprint=1712MB peak=1947MB
+released embed_text_32 footprint=1712MB
+loaded embed_text_64 71942ms footprint=1958MB peak=1958MB
+released embed_text_64 footprint=1958MB
+loaded embed_text_128 61150ms footprint=976MB peak=1961MB
+released embed_text_128 footprint=976MB
+loaded embed_image_70_tall 156203ms footprint=728MB peak=1961MB
+released embed_image_70_tall footprint=728MB
+loaded embed_image_70_portrait 164884ms footprint=729MB peak=1961MB
+released embed_image_70_portrait footprint=729MB
+loaded embed_image_70_square 136267ms footprint=1164MB peak=1961MB
+released embed_image_70_square footprint=1164MB
+loaded embed_image_70_landscape 147795ms footprint=1254MB peak=1961MB
+released embed_image_70_landscape footprint=1254MB
+loaded embed_image_70_wide 139725ms footprint=1255MB peak=1961MB
+released embed_image_70_wide footprint=1255MB
+== t70 warm
+pid 58833 start footprint=1MB
+loaded embed_text_16 56981ms footprint=504MB peak=1895MB
+released embed_text_16 footprint=504MB
+loaded embed_text_32 3657ms footprint=653MB peak=1895MB
+released embed_text_32 footprint=653MB
+loaded embed_text_64 3654ms footprint=654MB peak=1895MB
+released embed_text_64 footprint=654MB
+loaded embed_text_128 3600ms footprint=654MB peak=1895MB
+released embed_text_128 footprint=654MB
+loaded embed_image_70_tall 3579ms footprint=655MB peak=1895MB
+released embed_image_70_tall footprint=655MB
+loaded embed_image_70_portrait 3583ms footprint=658MB peak=1895MB
+released embed_image_70_portrait footprint=658MB
+loaded embed_image_70_square 3768ms footprint=658MB peak=1895MB
+released embed_image_70_square footprint=658MB
+loaded embed_image_70_landscape 3641ms footprint=658MB peak=1895MB
+released embed_image_70_landscape footprint=658MB
+loaded embed_image_70_wide 3711ms footprint=727MB peak=1895MB
+released embed_image_70_wide footprint=727MB
+== t280 cold
+pid 60156 start footprint=1MB
+loaded embed_text_16 72705ms footprint=759MB peak=1899MB
+released embed_text_16 footprint=759MB
+loaded embed_text_32 129265ms footprint=1252MB peak=1899MB
+released embed_text_32 footprint=1252MB
+loaded embed_text_64 57368ms footprint=1875MB peak=1899MB
+released embed_text_64 footprint=1875MB
+loaded embed_text_128 56853ms footprint=1911MB peak=1969MB
+released embed_text_128 footprint=1911MB
+loaded embed_image_280_tall 227031ms footprint=730MB peak=2019MB
+released embed_image_280_tall footprint=730MB
+loaded embed_image_280_portrait 235391ms footprint=1240MB peak=2019MB
+released embed_image_280_portrait footprint=1240MB
+loaded embed_image_280_square 163941ms footprint=1250MB peak=2019MB
+released embed_image_280_square footprint=1250MB
+loaded embed_image_280_landscape 218946ms footprint=1250MB peak=2019MB
+released embed_image_280_landscape footprint=1250MB
+loaded embed_image_280_wide 213175ms footprint=1251MB peak=2019MB
+released embed_image_280_wide footprint=1251MB
+== t280 warm
+pid 13684 start footprint=1MB
+loaded embed_text_16 3730ms footprint=125MB peak=546MB
+released embed_text_16 footprint=125MB
+loaded embed_text_32 3630ms footprint=252MB peak=546MB
+released embed_text_32 footprint=252MB
+loaded embed_text_64 3605ms footprint=261MB peak=546MB
+released embed_text_64 footprint=261MB
+loaded embed_text_128 3581ms footprint=262MB peak=546MB
+released embed_text_128 footprint=262MB
+loaded embed_image_280_tall 3748ms footprint=263MB peak=546MB
+released embed_image_280_tall footprint=263MB
+loaded embed_image_280_portrait 3720ms footprint=524MB peak=546MB
+released embed_image_280_portrait footprint=552MB
+loaded embed_image_280_square 3803ms footprint=584MB peak=584MB
+released embed_image_280_square footprint=699MB
+loaded embed_image_280_landscape 3696ms footprint=699MB peak=699MB
+released embed_image_280_landscape footprint=699MB
+loaded embed_image_280_wide 3666ms footprint=699MB peak=699MB
+released embed_image_280_wide footprint=699MB
+DONE

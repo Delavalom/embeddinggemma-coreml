@@ -1,0 +1,39 @@
+[s6] bundling EmbeddingGemma2-b70.aar as /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/Examples/PhotoSearchDemo/Model/b70 (files.json 99a7d34084f9186b)
+[s6] bundling EmbeddingGemma2-b280.aar as /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/Examples/PhotoSearchDemo/Model/b280 (files.json c62452de7a142b3a)
+[s6] building PhotoSearchDemo for iPhone 13 Pro Max (log: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/xcodebuild.log)
+[s6] installing on iPhone 13 Pro Max (iPhone14,3, iOS 27.0.1)
+[s6] compiling every function (minutes on a fresh install)
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] compile launch 1 failed (the app failed on the device (Documents/s6_compile.json): modelLoadFailed(underlying: Error Domain=com.apple.CoreML Code=0 "`MLModelConfiguration`'s `.functionName` property must be `nil` unless the model type is ML Program." UserInfo={NSLocalizedDescription=`MLModelConfiguration`'s `.functionName` property must be `nil` unless the model type is ML Program.})); relaunching in 180 s
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] the phone is locked: unlock it (keep it on the cable); retrying every 30 s
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+error: recipe `stage` was terminated by signal 15

@@ -1,0 +1,5 @@
+Launched application with com.delavalom.egcm.demo bundle identifier.
+Waiting for the application to terminate…
+2026-10-27 11:37:08.148 PhotoSearchDemo[704:23107] Successfully load keyboard extensions
+s6 benchmark FAILED: modelLoadFailed(underlying: Error Domain=com.apple.CoreML Code=0 "`MLModelConfiguration`'s `.functionName` property must be `nil` unless the model type is ML Program." UserInfo={NSLocalizedDescription=`MLModelConfiguration`'s `.functionName` property must be `nil` unless the model type is ML Program.})
+App terminated due to signal 15.

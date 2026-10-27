@@ -1,0 +1,25 @@
+{
+  "available_memory_mb_at_launch" : 3060.576484680176,
+  "budget_function_ms" : {
+
+  },
+  "device_model" : "iPhone14,3",
+  "finished_at" : "",
+  "free_disk_mb_at_launch" : 2411.3359375,
+  "function_ms" : {
+    "embed_text_16" : 43030.032042,
+    "embed_text_32" : 46356.06475,
+    "embed_text_64" : 52497.56975
+  },
+  "min_free_disk_mb" : 1627.125,
+  "model_revision" : "file-99a7d34084f9186b",
+  "model_revisions" : {
+    "70" : "file-99a7d34084f9186b"
+  },
+  "os_version" : "27.0.1",
+  "peak_rss_mb" : 1505.9407196044922,
+  "run_id" : "cachecheck2",
+  "started_at" : "2026-10-27T15:51:22Z",
+  "status" : "running",
+  "thermal_state" : "serious"
+}

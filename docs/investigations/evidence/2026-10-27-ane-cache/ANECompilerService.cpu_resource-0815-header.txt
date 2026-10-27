@@ -1,0 +1,45 @@
+{"app_name":"ANECompilerService","timestamp":"2026-10-27 08:15:19.00 -0400","slice_uuid":"6D308BCA-9711-330F-A370-30B8E9AE2A8F","build_version":"1","bundleID":"com.apple.ANECompilerService","duration_ms":"139625","share_with_app_devs":1,"is_first_party":1,"bug_type":"202","os_version":"iPhone OS 27.0.1 (24A446)","roots_installed":0,"name":"ANECompilerService","incident_id":"7C7AE80B-16AA-4419-A1E2-D0179EB56B01"}
+Date/Time:        2026-10-27 08:12:56.694 -0400
+End time:         2026-10-27 08:15:16.320 -0400
+OS Version:       iPhone OS 27.0.1 (Build 24A446)
+Architecture:     arm64e
+Report Version:   73
+Incident Identifier: 7C7AE80B-16AA-4419-A1E2-D0179EB56B01
+Share With Devs:  Yes
+
+Data Source:      Microstackshots
+Shared Cache:     F5C1D0CD-8C1D-3FDF-A9BB-C00A06965EFA slid base address 0x184654000
+
+Command:          ANECompilerService
+Path:             /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/ANECompilerService.xpc/ANECompilerService
+Identifier:       com.apple.ANECompilerService
+Version:          ??? (1)
+Resource Coalition: "com.apple.aned"(463)
+On Behalf Of:     21 samples UNKNOWN [14047] (21 samples originated by PhotoSearchDemo [16619])
+Architecture:     arm64e
+Parent:           UNKNOWN [1]
+PID:              16641
+
+Event:            cpu usage
+Action taken:     none
+CPU:              90 seconds cpu time over 140 seconds (64% cpu average), exceeding limit of 50% cpu over 180 seconds
+CPU limit:        90s
+Limit duration:   180s
+CPU used:         90s
+CPU duration:     140s
+Duration:         139.63s
+Duration Sampled: 130.22s (event starts 5.32s before samples, event ends 4.08s after samples)
+Steps:            47 (10 gigacycles/step)
+
+Hardware model:   iPhone14,3
+Active cpus:      6
+Memory size:      5.51 GB
+HW page size:     16384
+VM page size:     16384
+Shared cache residency: 7.62% (521.56 MB / 6842.64 MB)
+
+Time Since Boot:  369832s
+Time Awake Since Boot: 232374s
+Time Since Wake:  40743s
+
+Total CPU Time:   129.137s

@@ -1,0 +1,28 @@
+{
+  "available_memory_mb_at_launch" : 3063.295280456543,
+  "budget_function_ms" : {
+
+  },
+  "device_model" : "iPhone14,3",
+  "finished_at" : "",
+  "free_disk_mb_at_launch" : 3071.8834381103516,
+  "function_ms" : {
+    "embed_image_70_portrait" : 170949.741167,
+    "embed_image_70_tall" : 165199.585375,
+    "embed_text_128" : 66467.74725,
+    "embed_text_16" : 44923.245375,
+    "embed_text_32" : 48041.955083,
+    "embed_text_64" : 149477.380291
+  },
+  "min_free_disk_mb" : 1634.0396881103516,
+  "model_revision" : "file-99a7d34084f9186b",
+  "model_revisions" : {
+    "70" : "file-99a7d34084f9186b"
+  },
+  "os_version" : "27.0.1",
+  "peak_rss_mb" : 1401.3937530517578,
+  "run_id" : "cachecheck",
+  "started_at" : "2026-10-27T14:35:42Z",
+  "status" : "running",
+  "thermal_state" : "serious"
+}

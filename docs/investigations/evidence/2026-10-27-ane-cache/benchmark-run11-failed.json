@@ -1,0 +1,25 @@
+{
+  "budgets" : {
+
+  },
+  "device_model" : "iPhone14,3",
+  "error" : "modelLoadFailed(underlying: Error Domain=com.apple.CoreML Code=0 \"`MLModelConfiguration`'s `.functionName` property must be `nil` unless the model type is ML Program.\" UserInfo={NSLocalizedDescription=`MLModelConfiguration`'s `.functionName` property must be `nil` unless the model type is ML Program.})",
+  "finished_at" : "2026-10-27T15:50:21Z",
+  "model_revision" : "",
+  "model_revisions" : {
+
+  },
+  "os_version" : "27.0.1",
+  "peak_rss_mb" : 1426.0501174926758,
+  "photos_available" : 1000,
+  "query" : {
+    "ms" : {
+      "count" : 0
+    },
+    "queries" : 0
+  },
+  "run_id" : "15d1bd660d5f4162ad044d735e64ca28",
+  "started_at" : "2026-10-27T15:37:04Z",
+  "status" : "error",
+  "thermal_state" : "serious"
+}

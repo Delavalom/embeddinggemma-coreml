@@ -1,0 +1,23 @@
+[s6] bundling EmbeddingGemma2-b70.aar as /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/Examples/PhotoSearchDemo/Model/b70 (files.json 99a7d34084f9186b)
+[s6] bundling EmbeddingGemma2-b280.aar as /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/Examples/PhotoSearchDemo/Model/b280 (files.json c62452de7a142b3a)
+[s6] building PhotoSearchDemo for iPhone 13 Pro Max (log: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/dev/xcodebuild.log)
+[s6] installing on iPhone 13 Pro Max (iPhone14,3, iOS 27.0.1)
+[s6] compiling every function (minutes on a fresh install)
+[s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/dev/console_iPhone14,3-compile.log
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/scripts/s6_dev.py", line 42, in <module>
+    main()
+  File "/Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/scripts/s6_dev.py", line 32, in main
+    result = s6.benchmark(device, s6.build_app(device, out), out, ctl)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/stages/s6_device/run.py", line 112, in benchmark
+    compiled = launch(device, out, ctl, "-compile", COMPILE_RESULT_FILE)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/stages/s6_device/run.py", line 97, in launch
+    return poll_result(lambda: ctl.fetch_result(device, out / Path(source).name, source), run_id,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/stages/s6_device/device.py", line 84, in poll_result
+    raise TimeoutError(f"no result for run {run_id} after {timeout / 60:.0f} min")
+TimeoutError: no result for run e6f9a727aec341b5aa7d5645455aa83c after 30 min
