@@ -30,6 +30,7 @@ from stages.s6_device.device import (
     BUNDLE_ID,
     COMPILE_RESULT_FILE,
     RESULT_FILE,
+    TIMEOUT_SECONDS,
     Device,
     Devicectl,
     pick_device,
@@ -45,6 +46,9 @@ MODEL_DIR = DEMO / "Model"
 # A function load in the benchmark slower than this was a compile, not a warm load (ADR-0009). Measured on the
 # iPhone 13 Pro Max: cold compiles 45-240 s per function, warm loads of the whole 14-function package 6.5-7 s.
 MAX_WARM_LOAD_MS = 30_000
+# The compile run: 18 cold compiles (4 text + 5 image per budget package), 45-240 s each on the iPhone 13 Pro Max,
+# plus the cooldown before a retry (FunctionLoad.cooldown). The benchmark keeps device.TIMEOUT_SECONDS.
+COMPILE_TIMEOUT_SECONDS = 120 * 60
 
 
 def log(msg: str) -> None:
@@ -86,8 +90,10 @@ def build_app(device: Device, out: Path) -> Path:
     return app
 
 
-def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str) -> dict:
-    """Launches the installed app with `mode` (`-compile` or `-benchmark`) and waits for this run's `source`."""
+def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str,
+           timeout: float = TIMEOUT_SECONDS) -> dict:
+    """Launches the installed app with `mode` (`-compile` or `-benchmark`) and waits up to `timeout` s for this
+    run's `source`."""
     run_id = uuid.uuid4().hex
     console = out / f"console_{device.product_type}{mode}.log"
     with open(console, "w") as f:
@@ -95,7 +101,7 @@ def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str) ->
         log(f"launched {mode}. Keep the phone unlocked. Console: {console}")
         try:
             return poll_result(lambda: ctl.fetch_result(device, out / Path(source).name, source), run_id,
-                               app_exited=proc.poll, log=log, name=source)
+                               app_exited=proc.poll, log=log, name=source, timeout=timeout)
         finally:
             if proc.poll() is None:
                 proc.terminate()
@@ -109,7 +115,7 @@ def benchmark(device: Device, app: Path, out: Path, ctl: Devicectl | None = None
     log(f"installing on {device.marketing_name} ({device.product_type}, iOS {device.os_version})")
     ctl.install(device, app)
     log("compiling every function (minutes on a fresh install)")
-    compiled = launch(device, out, ctl, "-compile", COMPILE_RESULT_FILE)
+    compiled = launch(device, out, ctl, "-compile", COMPILE_RESULT_FILE, COMPILE_TIMEOUT_SECONDS)
     log("benchmarking. Tap Allow Full Access on the phone if it asks for Photos (first run only)")
     result = launch(device, out, ctl, "-benchmark", RESULT_FILE)
     return result | {"compile": compiled}

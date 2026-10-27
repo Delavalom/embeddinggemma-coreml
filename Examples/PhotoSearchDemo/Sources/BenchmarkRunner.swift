@@ -184,7 +184,7 @@ struct Stats: Encodable {
 /// Peak `phys_footprint` over the run, sampled every 100 ms on a background task.
 final class MemorySampler: @unchecked Sendable {
   private let lock = NSLock()
-  private var peak: UInt64 = 0
+  private var peakBytes: UInt64 = 0
   private var task: Task<Void, Never>?
 
   func start() {
@@ -196,16 +196,19 @@ final class MemorySampler: @unchecked Sendable {
     }
   }
 
+  /// The peak so far, in bytes.
+  var peak: UInt64 { lock.withLock { peakBytes } }
+
   /// Stops sampling and returns the peak in bytes.
   func stop() -> UInt64 {
     task?.cancel()
     record()
-    return lock.withLock { peak }
+    return lock.withLock { peakBytes }
   }
 
   private func record() {
     let now = Self.physFootprint()
-    lock.withLock { peak = max(peak, now) }
+    lock.withLock { peakBytes = max(peakBytes, now) }
   }
 
   static func physFootprint() -> UInt64 {

@@ -27,7 +27,7 @@ final class CompileRunner {
     let sampler = MemorySampler()
     sampler.start()
     do {
-      try await compile(into: &result)
+      try await compile(into: &result, sampler: sampler)
       result.status = "done"
     } catch {
       result.status = "error"
@@ -37,9 +37,7 @@ final class CompileRunner {
     result.thermalState = ProcessInfo.processInfo.thermalState.name
     result.finishedAt = Date().ISO8601Format()
     do {
-      let enc = JSONEncoder()
-      enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-      try enc.encode(result).write(to: Self.resultURL, options: .atomic)
+      try Self.write(result)
       status = result.status == "done" ? "DONE" : "FAILED: \(result.error ?? "")"
     } catch {
       status = "FAILED to write the result: \(error)"
@@ -51,7 +49,9 @@ final class CompileRunner {
   /// Every function of each budget's package. With one package per budget (ADR-0010) the text functions live in
   /// both packages and compile once in each; with one 14-function package (both budgets report the same revision)
   /// they compile once.
-  private func compile(into result: inout CompileResult) async throws {
+  /// After each function the result is written with status "running" (s6 waits for "done" or "error"), so a run that
+  /// is stopped still shows how far it got, its peak so far and the thermal state.
+  private func compile(into result: inout CompileResult, sampler: MemorySampler) async throws {
     var compiled = Set<String>()  // "<model revision>/<function>"
     for step in BenchmarkRunner.plan {
       status = "installing the model at budget \(step.key)"
@@ -69,9 +69,20 @@ final class CompileRunner {
         stepMS[name] = ms
         if result.functionMS[name] == nil { result.functionMS[name] = ms }
         await model.unloadFunctions()
+        result.peakRSSMB = Double(sampler.peak) / 1_048_576
+        result.thermalState = ProcessInfo.processInfo.thermalState.name
+        try? Self.write(result)
       }
       result.budgetFunctionMS[step.key] = stepMS
     }
+  }
+}
+
+extension CompileRunner {
+  static func write(_ result: CompileResult) throws {
+    let enc = JSONEncoder()
+    enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+    try enc.encode(result).write(to: resultURL, options: .atomic)
   }
 }
 
