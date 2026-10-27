@@ -24,6 +24,8 @@ final class CompileRunner {
     try? FileManager.default.removeItem(at: Self.resultURL)
     var result = CompileResult(runID: runID)
     result.availableMemoryMBAtLaunch = Double(os_proc_available_memory()) / 1_048_576
+    result.freeDiskMBAtLaunch = freeDiskMB()
+    result.minFreeDiskMB = result.freeDiskMBAtLaunch
     let sampler = MemorySampler()
     sampler.start()
     do {
@@ -70,6 +72,7 @@ final class CompileRunner {
         if result.functionMS[name] == nil { result.functionMS[name] = ms }
         await model.unloadFunctions()
         result.peakRSSMB = Double(sampler.peak) / 1_048_576
+        if let free = freeDiskMB() { result.minFreeDiskMB = min(result.minFreeDiskMB ?? free, free) }
         result.thermalState = ProcessInfo.processInfo.thermalState.name
         try? Self.write(result)
       }
@@ -105,6 +108,10 @@ struct CompileResult: Encodable {
   var budgetFunctionMS: [String: [String: Double]] = [:]
   /// `os_proc_available_memory()` at launch: how much more this app could use before iOS ends it.
   var availableMemoryMBAtLaunch = 0.0
+  /// Free space for important use (`volumeAvailableCapacityForImportantUsage`) at launch and the lowest seen after
+  /// each function: the Neural Engine compiler and its cache need disk.
+  var freeDiskMBAtLaunch: Double?
+  var minFreeDiskMB: Double?
   var peakRSSMB = 0.0
   var thermalState = ""
   var startedAt = Date().ISO8601Format()
@@ -115,6 +122,7 @@ struct CompileResult: Encodable {
     case modelRevision = "model_revision", modelRevisions = "model_revisions", functionMS = "function_ms"
     case budgetFunctionMS = "budget_function_ms"
     case availableMemoryMBAtLaunch = "available_memory_mb_at_launch", peakRSSMB = "peak_rss_mb"
+    case freeDiskMBAtLaunch = "free_disk_mb_at_launch", minFreeDiskMB = "min_free_disk_mb"
     case thermalState = "thermal_state", startedAt = "started_at", finishedAt = "finished_at"
   }
 

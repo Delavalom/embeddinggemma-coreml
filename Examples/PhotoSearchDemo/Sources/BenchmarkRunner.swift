@@ -223,6 +223,12 @@ final class MemorySampler: @unchecked Sendable {
   }
 }
 
+/// Free space for important use on the app's volume, in MB.
+func freeDiskMB() -> Double? {
+  let values = try? URL.homeDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+  return values?.volumeAvailableCapacityForImportantUsage.map { Double($0) / 1_048_576 }
+}
+
 func osVersionString() -> String {
   let v = ProcessInfo.processInfo.operatingSystemVersion
   return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
