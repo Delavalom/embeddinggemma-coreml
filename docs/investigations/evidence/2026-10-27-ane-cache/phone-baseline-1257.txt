@@ -1,0 +1,13 @@
+# Phone disk after the founder freed ~10 GB and PhotoSearchDemo was uninstalled (12:53), 2026-10-27 AST.
+# Source: ideviceinfo -q com.apple.disk_usage (libimobiledevice, lockdown), 4 samples 20 s apart, all equal ±10 MB.
+# devicectl 'info details' has no free-space field (checked 12:53).
+AmountDataAvailable: 3225624576
+AmountDataReserved: 209715200
+AmountRestoreAvailable: 11803930624
+CalculateDiskUsage: OkilyDokily
+TotalDataAvailable: 76300230656
+TotalDataCapacity: 106720952320
+TotalDiskCapacity: 128000000000
+TotalSystemAvailable: 0
+TotalSystemCapacity: 8368590848
+# Founder (Settings): < 4 GB available. iOS 27.0.1 24A446. App container before uninstall: 26 E5 key folders, 0 finished bundles with payload (~/egcm-evidence-raw/2026-10-27/listing-pre-uninstall.json).

@@ -173,6 +173,7 @@ REPO=$(git -C "$(dirname $0)" rev-parse --show-toplevel)
 list() { xcrun devicectl device info files --device $U --domain-type appDataContainer --domain-identifier $APP \
            --subdirectory Library --json-output $1 >/dev/null 2>&1; }
 list $D/pre.json
+ideviceinfo -u $U -q com.apple.disk_usage | grep -v NANDInfo > $D/disk-pre.txt   # free space seen from the Mac
 date -u +%FT%TZ > $D/launched-at.txt
 xcrun devicectl device process launch --device $U --terminate-existing $APP -- -tag $TAG "$@" >/dev/null 2>&1 \
   || { echo "$TAG LAUNCH FAILED (phone locked?)"; exit 1; }
@@ -183,6 +184,7 @@ for i in {1..240}; do   # up to 60 min
   grep -q '"status":"running"' $D/probe.json || break
 done
 list $D/post.json
+ideviceinfo -u $U -q com.apple.disk_usage | grep -v NANDInfo > $D/disk-post.txt
 cd $REPO && uv run --exact --group convert python - $D <<'EOF'
 import json, sys
 from pathlib import Path
