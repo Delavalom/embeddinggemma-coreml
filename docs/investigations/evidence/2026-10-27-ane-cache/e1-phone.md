@@ -72,3 +72,15 @@ for 10 min. Every relaunch after a deletion was cold (45.9, 45.7 s); every relau
 - iOS purged other purgeable data first (9.5 GB at 14:56 left ours alone); ours went when little else was left.
 - `functionName` error: 0 of 4 cold relaunches against an emptied entry (r1, r3, r4, plus e1e-update). H6 is not
   supported so far; the error's trigger stays open (U3).
+
+## E1d — all 9 b70 functions, ample free space (fresh install per round; A = cold, 10-min watch, B = relaunch)
+
+| Round | A: loads (s), free mac MB | Failed in A (`functionName`, s into the load) | Watch (5 × 2 min) | B (since A end) |
+|---|---|---|---|---|
+| r1 | 48.5 / 49.5 / 52.4 / 54.0 / 126.2 / ✗ / 125.9 / 129.9 / 127.2; 28,123→23,409 | image_70_portrait (45.4) — log: ANECompilerService killed, InactiveHard 6 MB | 8/8 with files throughout | 8 warm **3.2–4.2 s**; portrait cold 124.2 s; peak 814 MB (576 before the cold one) |
+| r2 | 51.5 / 58.0 / ✗ / 58.6 / 132.1 / 141.2 / 138.5 / ✗ / 136.0; 23,775→19,317 | text_64 (41.2), image_70_landscape (49.0) | 7/7 with files throughout | **lost: launch failed, phone locked** |
+| r3 | 50.5 / 53.6 / 55.1 / 57.8 / 134.9 / 139.3 / 137.1 / ✗ / 133.9; 20,788→14,863 | image_70_landscape (48.8) | 8/8 with files throughout | 8 warm **3.1–3.9 s**; landscape cold 121.9 s; peak 786 MB (576 before the cold one) |
+
+Thermal state 2 (serious) through every A. Cold-compile failures: 4 of 27 (15%), all 41–49 s into the load, at
+14.9–28 GB free. Every function that compiled was warm on relaunch (16/16 in r1-B and r3-B); every function that
+failed in A compiled cold on relaunch (2/2). One milhash folder per function load (9 for 9 functions).
