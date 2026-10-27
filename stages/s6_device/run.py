@@ -108,6 +108,17 @@ UNLOCK_WAIT_SECONDS = 60 * 60
 UNLOCK_POLL_SECONDS = 30
 
 
+def app_exit_code(devicectl_rc: int | None, console: Path) -> int | None:
+    """devicectl's exit code once the app has ended, else None. devicectl also exits when its connection to the phone
+    drops ("The connection was invalidated"), with the app still running; that keeps polling for the result file."""
+    if devicectl_rc is None:
+        return None
+    text = console.read_text(errors="replace") if console.is_file() else ""
+    if "App terminated" in text or "failed to launch" in text or "Unable to launch" in text:
+        return devicectl_rc
+    return None
+
+
 def _launch_once(device: Device, out: Path, ctl: Devicectl, mode: str, source: str, timeout: float) -> dict:
     run_id = uuid.uuid4().hex
     console = out / f"console_{device.product_type}{mode}.log"
@@ -116,7 +127,8 @@ def _launch_once(device: Device, out: Path, ctl: Devicectl, mode: str, source: s
         log(f"launched {mode}. Keep the phone unlocked. Console: {console}")
         try:
             return poll_result(lambda: ctl.fetch_result(device, out / Path(source).name, source), run_id,
-                               app_exited=proc.poll, log=log, name=source, timeout=timeout)
+                               app_exited=lambda: app_exit_code(proc.poll(), console), log=log, name=source,
+                               timeout=timeout)
         except RuntimeError as e:
             if "failed to launch" in console.read_text(errors="replace"):
                 raise PhoneLocked(f"could not launch {mode}: unlock the phone") from e

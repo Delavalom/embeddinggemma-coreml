@@ -287,3 +287,12 @@ def test_launch_waits_while_the_phone_is_locked(tmp_path, monkeypatch):
     sleeps = []
     assert s6.launch(None, tmp_path, None, "-compile", "x", sleep=sleeps.append) == {"status": "done"}
     assert len(tries) == 3 and sleeps == [s6.UNLOCK_POLL_SECONDS] * 2
+
+
+def test_a_dropped_console_connection_is_not_an_app_exit(tmp_path):
+    console = tmp_path / "c.log"
+    console.write_text("Launched application\nERROR: The connection was invalidated.\n")
+    assert s6.app_exit_code(1, console) is None  # the app is still running: keep polling
+    assert s6.app_exit_code(None, console) is None
+    console.write_text("Waiting for the application to terminate\nApp terminated due to signal 9.\n")
+    assert s6.app_exit_code(0, console) == 0
