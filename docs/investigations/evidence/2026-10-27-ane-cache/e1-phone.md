@@ -11,3 +11,21 @@ space was lower.
 | e1a-r1-A | b70 ne text_16 | 28 | 16,211→16,601 | 0→0 | **46,414** (cold) | 1,375 | 3/2/2 | — | first ANE compile of text_16 on this install |
 | e1a-r1-w | 9 listings, 2 min apart, app closed | — | 16,602→14,740→16,401 | — | — | — | 3/2/2 every time | none | free space moved by ±1.9 GB with our app closed (another process) |
 | e1a-r1-B | b70 ne text_16 | 999 | 16,379→16,389 | 0→0 | **3,697** (warm) | 578 | 3/2/2, no key added | none | same entry reused 16.6 min later |
+| e1a-r2-A | fresh install, b70 ne text_16 | — | 17,510→16,422 | 0→2 | **48,362** (cold) | 1,315 | 2/1/1 | — | key 9D2AEBFD |
+| e1a-r2-w | 8 listings, 2 min apart, app closed | — | 16,423→14,739 (min) | — | — | — | 2/1/1 every time | none | |
+| e1a-r2-B | b70 ne text_16 | 848 | 14,722→16,004 | 0→0 | **3,230** (warm) | 577 | no key added | none | |
+| e1a-r3-A | fresh install, b70 ne text_16 | — | 16,601→15,846 | 0→1 | **47,839** (cold) | 1,315 | 2/1/1 | — | key B85C2D2E |
+| e1a-r3-w | 8 listings, 2 min apart, app closed | — | 15,847→18,138→16,381 | — | — | — | 2/1/1 every time | none | |
+| e1a-r3-B | b70 ne text_16 | 849 | 16,380→16,354 | 0→0 | **3,297** (warm) | 577 | no key added | none | |
+
+## E1a result (3 of 3 rounds, ≥ 14.7 GB actually free throughout)
+
+- Cold compile of `embed_text_16`: 46.4 / 48.4 / 47.8 s. Relaunch 14–17 min later: **3.7 / 3.2 / 3.3 s**, peak 577–578 MB.
+- No compiled file lost in 25 listings over 3 × ~16 min; no key added by any relaunch.
+- **The key differs per install, not per launch:** the same bytes of b70 got key 0883DD1D (r1), 9D2AEBFD (r2) and
+  B85C2D2E (r3), one per fresh install (new container, new compiled-model path and inodes), and the relaunch within an
+  install reused it every time. This explains the handoff's two keys for `embed_text_16` (072165CC before run 11, a
+  separate install, and 10F6E2EA in run 11).
+- So, with plenty of free space, on iOS 27.0.1: H1 (files removed with no pressure) and H3 (key changes per launch) were
+  not seen at this scale (1 function, ~16 min). Still to do: H2 directly (low free space), longer gaps and a reboot
+  (E1b), and 9 functions (E1d).
