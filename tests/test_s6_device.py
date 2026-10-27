@@ -270,7 +270,7 @@ def test_compile_all_gives_up_after_the_last_launch(tmp_path, monkeypatch):
         raise RuntimeError("flaky")
 
     monkeypatch.setattr(s6, "launch", launch)
-    with pytest.raises(RuntimeError, match="failed in 3 launches"):
+    with pytest.raises(RuntimeError, match=f"failed in {s6.COMPILE_LAUNCHES} launches"):
         s6.compile_all(None, tmp_path, None, pause=lambda _: None)
 
 
