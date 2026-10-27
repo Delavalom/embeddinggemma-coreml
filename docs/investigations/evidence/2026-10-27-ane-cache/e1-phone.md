@@ -49,3 +49,12 @@ Whether an App Store update moves the container the way `devicectl install` does
 | e1e-r1-fill2 | `-fill 9024` | 10,572→2,255 | 2/2 | — | app free 3,474 → only ~1.2 GB purgeable left |
 | e1e-r1-w2 | 8 listings, 1 min apart, app closed | 2,255→1,938→2,331→3,017 | **2/2 → 0/2 between 15:02:05 and 15:03:06** | — | iOS deleted the files of both our finished entries with our app not running |
 | e1e-r1-B | b70 ne text_16 | 3,010→2,494 | 1/2 after | **45,910 (cold)** | same key (none added); recompiled into it; no `functionName` error |
+| e1e-r2-w | 10 listings, 1 min apart, app closed, filler kept | 2,494→2,249 (min) | 1/1 throughout | — | no purge at ≥ 2.25 GB free in 10 min |
+| e1e-r2-B | b70 ne text_16 | 2,246→2,247 | 1/1 | **3,144 (warm)** | |
+| e1e-r3-w | 10 listings, filler kept | 2,247→**1,873** (15:18:59, other activity)→1,473→3,076 | **1/1 → 0/1 between 15:18:59 and 15:19:59** | — | purge with our app closed, at ~1.9 GB free |
+| e1e-r3-B | b70 ne text_16 | 3,043→2,523 | 1/1 after | **45,700 (cold)** | same key; no `functionName` error |
+| e1e-unfill | `-unfill` (removed 25,216 MB) | 2,523→27,742 | 1/1 | — | |
+
+So far, low free space: our files were deleted in 2 of 3 rounds (r1, r3, both when free space went below ~1.9 GB), with
+2 more deletions in yesterday's logs (11:33, 11:41). They were not deleted in r2, where free space stayed ≥ 2.25 GB
+for 10 min. Every relaunch after a deletion was cold (45.9, 45.7 s); every relaunch without one was warm (3.1 s).
