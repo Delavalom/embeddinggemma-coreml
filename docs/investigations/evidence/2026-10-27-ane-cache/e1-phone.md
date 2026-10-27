@@ -58,3 +58,17 @@ Whether an App Store update moves the container the way `devicectl install` does
 So far, low free space: our files were deleted in 2 of 3 rounds (r1, r3, both when free space went below ~1.9 GB), with
 2 more deletions in yesterday's logs (11:33, 11:41). They were not deleted in r2, where free space stayed ≥ 2.25 GB
 for 10 min. Every relaunch after a deletion was cold (45.9, 45.7 s); every relaunch without one was warm (3.1 s).
+| e1e-r4-fill | `-fill 26240` (15:28:42–15:31:14Z+4h) | 27,743→2,049 | **1/1 → 0/1 during the fill** (lost 268 MB, key 370ED008) | — | app "important" free 28,359→2,246: almost nothing else purgeable left |
+| e1e-r4-w | 10 listings, 1 min apart | 2,049→1,937 | 0/1 throughout | — | |
+| e1e-r4-B | b70 ne text_16 | 1,936→1,396 | 1/1 after | **101,618 (cold)** | thermal 0→2; 2.2× slower than the other cold compiles (one run: note, not a finding yet); no `functionName` error |
+| e1e-r4-unfill | removed 26,240 MB | 1,396→27,639 | 1/1 | — | |
+
+## E1e result
+
+- **Low free space deletes our compiled files: 3 of 3 deliberate rounds where free space went below ~2.0 GB** (r1 at
+  15:03, log-attributed to iOS CacheDelete/APFS purge; r3 at ~1.9 GB; r4 during the fill to 2.05 GB), with our app
+  not loading anything. Not deleted in r2 (≥ 2.25 GB for 10 min) or in E1a (≥ 14.7 GB, 3 × 16 min).
+- Every relaunch after a deletion compiled cold (45.9, 45.7, 101.6 s); every relaunch without one was warm (3.1–3.7 s).
+- iOS purged other purgeable data first (9.5 GB at 14:56 left ours alone); ours went when little else was left.
+- `functionName` error: 0 of 4 cold relaunches against an emptied entry (r1, r3, r4, plus e1e-update). H6 is not
+  supported so far; the error's trigger stays open (U3).
