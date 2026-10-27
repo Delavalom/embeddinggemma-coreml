@@ -98,10 +98,16 @@ def build_app(device: Device, out: Path) -> Path:
     return app
 
 
-def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str,
-           timeout: float = TIMEOUT_SECONDS) -> dict:
-    """Launches the installed app with `mode` (`-compile` or `-benchmark`) and waits up to `timeout` s for this
-    run's `source`."""
+class PhoneLocked(RuntimeError):
+    """devicectl could not start the app: the phone is locked (iOS answers "failed to launch ... Invalid argument")."""
+
+
+# How long `launch` waits for the phone to be unlocked, retrying every UNLOCK_POLL_SECONDS.
+UNLOCK_WAIT_SECONDS = 60 * 60
+UNLOCK_POLL_SECONDS = 30
+
+
+def _launch_once(device: Device, out: Path, ctl: Devicectl, mode: str, source: str, timeout: float) -> dict:
     run_id = uuid.uuid4().hex
     console = out / f"console_{device.product_type}{mode}.log"
     with open(console, "w") as f:
@@ -110,9 +116,31 @@ def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str,
         try:
             return poll_result(lambda: ctl.fetch_result(device, out / Path(source).name, source), run_id,
                                app_exited=proc.poll, log=log, name=source, timeout=timeout)
+        except RuntimeError as e:
+            if "failed to launch" in console.read_text(errors="replace"):
+                raise PhoneLocked(f"could not launch {mode}: unlock the phone") from e
+            raise
         finally:
             if proc.poll() is None:
                 proc.terminate()
+
+
+def launch(device: Device, out: Path, ctl: Devicectl, mode: str, source: str,
+           timeout: float = TIMEOUT_SECONDS, sleep: Callable[[float], None] = time.sleep) -> dict:
+    """Launches the installed app with `mode` (`-compile` or `-benchmark`) and waits up to `timeout` s for this
+    run's `source`. While the phone is locked it retries every UNLOCK_POLL_SECONDS, up to UNLOCK_WAIT_SECONDS."""
+    waited = 0
+    while True:
+        try:
+            return _launch_once(device, out, ctl, mode, source, timeout)
+        except PhoneLocked:
+            if waited >= UNLOCK_WAIT_SECONDS:
+                raise
+            if waited == 0:
+                log("the phone is locked: unlock it (keep it on the cable); retrying every "
+                    f"{UNLOCK_POLL_SECONDS} s")
+            sleep(UNLOCK_POLL_SECONDS)
+            waited += UNLOCK_POLL_SECONDS
 
 
 def benchmark(device: Device, app: Path, out: Path, ctl: Devicectl | None = None) -> dict:

@@ -272,3 +272,18 @@ def test_compile_all_gives_up_after_the_last_launch(tmp_path, monkeypatch):
     monkeypatch.setattr(s6, "launch", launch)
     with pytest.raises(RuntimeError, match="failed in 3 launches"):
         s6.compile_all(None, tmp_path, None, pause=lambda _: None)
+
+
+def test_launch_waits_while_the_phone_is_locked(tmp_path, monkeypatch):
+    tries = []
+
+    def once(device, out, ctl, mode, source, timeout):
+        tries.append(mode)
+        if len(tries) < 3:
+            raise s6.PhoneLocked("locked")
+        return {"status": "done"}
+
+    monkeypatch.setattr(s6, "_launch_once", once)
+    sleeps = []
+    assert s6.launch(None, tmp_path, None, "-compile", "x", sleep=sleeps.append) == {"status": "done"}
+    assert len(tries) == 3 and sleeps == [s6.UNLOCK_POLL_SECONDS] * 2
