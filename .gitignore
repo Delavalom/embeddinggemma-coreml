@@ -14,3 +14,4 @@ Examples/PhotoSearchDemo/Model/
 /Package.resolved
 scripts/probes/ios-load-probe/Team.xcconfig
 scripts/probes/ios-load-probe/*.xcodeproj
+scripts/probes/ios-load-probe/ProbeModels/

@@ -11,6 +11,11 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # Folder reference: the .mlpackage folders are copied as they are (not compiled by Xcode); the probe
+      # compiles them on the device. Built by build-models.sh (gitignored).
+      - path: ProbeModels
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.delavalom.egcm.demo

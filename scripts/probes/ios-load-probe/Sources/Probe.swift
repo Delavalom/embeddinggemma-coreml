@@ -1,75 +1,202 @@
 import CoreML
 import SwiftUI
 import UIKit
+import os
+
+// The ANE cache probe (docs/superpowers/plans/2026-10-27-ios27-ane-cache-investigation.md, Task 3). One variable per
+// launch; every launch writes Documents/probe-<tag>.json with its environment and every load.
+//
+// Launch arguments:
+//   -tag X              output Documents/probe-X.json
+//   -model b70|t16      bundled package (default b70); compiled once on the device into Application Support/probe/
+//   -fns a,b            functions to load, one at a time, each released before the next
+//   -noFunctionName     load without config.functionName (the 1-function package t16)
+//   -units ne|gpu|cpu|all
+//   -api async|sync     MLModel.load(contentsOf:configuration:) (default) or MLModel(contentsOf:configuration:)
+//   -from as|tmp        load from Application Support (default, like ModelStore) or from a fresh tmp copy
+//   -retries N          tries per function (default 1: the experiments want the raw failure)
+//   -wipePayload        delete every regular file under our E5 cache's *.bundle folders first (H6), keep folders
 
 @main struct ProbeApp: App {
+  @State private var status = "probe"
   var body: some Scene {
     WindowGroup {
-      Text("probe").task {
-        UIApplication.shared.isIdleTimerDisabled = true  // keeps the phone awake while the probe is in front
-        await runProbe()
+      Text(status).font(.title.monospaced()).task {
+        UIApplication.shared.isIdleTimerDisabled = true  // the probe must stay in front and awake
+        status = await runProbe()
       }
     }
   }
 }
 
-func footprintMB() -> Int {
+struct Load: Codable {
+  var fn: String
+  var attempt = 1
+  var ok = false
+  var ms = 0
+  var error: String?
+  var footprintMB = 0
+  var peakMB = 0
+  var thermal = 0
+  var freeDiskMB = 0
+  var note: String?
+}
+
+struct Report: Codable {
+  var tag: String
+  var args: [String]
+  var osBuild: String
+  var startedAt: String
+  var finishedAt = ""
+  var secondsSinceLastProbe: Double?
+  var thermalStart: Int
+  var thermalEnd = 0
+  var freeDiskMBStart: Int
+  var freeDiskMBEnd = 0
+  var availMemMBStart: Int
+  var modelPath = ""
+  var modelFiles: [String: [String: String]] = [:]  // file → size, mtime, inode
+  var compileMS: Int?
+  var loads: [Load] = []
+  var status = "running"
+}
+
+func footprint() -> (Int, Int) {
   var info = task_vm_info_data_t()
   var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
   let kr = withUnsafeMutablePointer(to: &info) {
-    $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+    $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+      task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+    }
   }
-  return kr == KERN_SUCCESS ? Int(info.phys_footprint / 1_048_576) : -1
+  guard kr == KERN_SUCCESS else { return (-1, -1) }
+  return (Int(info.phys_footprint / 1_048_576), Int(info.ledger_phys_footprint_peak / 1_048_576))
 }
 
-// Launch: -hold a,b,c   loads each with cpuAndNeuralEngine and keeps it; on failure retries once.
-//         -tag X        names the output file Documents/probe-X.txt
-func runProbe() async {
+func freeDiskMB() -> Int {
+  let v = try? URL.documentsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+  return Int((v?.volumeAvailableCapacityForImportantUsage ?? -1_048_576) / 1_048_576)
+}
+
+func osBuild() -> String {
+  var size = 0
+  sysctlbyname("kern.osversion", nil, &size, nil, 0)
+  var b = [CChar](repeating: 0, count: size)
+  sysctlbyname("kern.osversion", &b, &size, nil, 0)
+  return String(cString: b)
+}
+
+func fileFacts(_ dir: URL) -> [String: [String: String]] {
+  var out: [String: [String: String]] = [:]
+  for name in ["model.mil", "weights/weight.bin", "coremldata.bin"] {
+    guard let a = try? FileManager.default.attributesOfItem(atPath: dir.appending(path: name).path) else { continue }
+    out[name] = ["size": "\(a[.size] ?? "")",
+                 "mtime": "\((a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)",
+                 "inode": "\(a[.systemFileNumber] ?? "")"]
+  }
+  return out
+}
+
+/// Deletes the regular files under our own E5 cache's `*.bundle` folders and keeps the folders, which is the state
+/// iOS's purge left behind on 2026-10-27 (evidence/2026-10-27-ane-cache/e2-run11-ios-purge.md). Returns the count.
+func wipePayload() -> Int {
+  let root = URL.cachesDirectory.appending(path: "\(Bundle.main.bundleIdentifier!)/com.apple.e5rt.e5bundlecache")
+  guard let it = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else {
+    return 0
+  }
+  var removed = 0
+  for case let f as URL in it where f.path.contains(".bundle/") {
+    if (try? f.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+      if (try? FileManager.default.removeItem(at: f)) != nil { removed += 1 }
+    }
+  }
+  return removed
+}
+
+/// Compiles the bundled package once into Application Support/probe/<model>.mlmodelc (like ModelStore) and reuses it
+/// on later launches. Returns the compiled URL and the compile time if it compiled now.
+func compiledModel(_ name: String) async throws -> (URL, Int?) {
+  let dir = URL.applicationSupportDirectory.appending(path: "probe")
+  let compiled = dir.appending(path: "\(name).mlmodelc")
+  if FileManager.default.fileExists(atPath: compiled.path) { return (compiled, nil) }
+  guard let src = Bundle.main.url(forResource: name, withExtension: "mlpackage", subdirectory: "ProbeModels") else {
+    throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: "ProbeModels/\(name).mlpackage"])
+  }
+  let t = Date()
+  let tmp = try await MLModel.compileModel(at: src)
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  try FileManager.default.moveItem(at: tmp, to: compiled)
+  return (compiled, Int(Date().timeIntervalSince(t) * 1000))
+}
+
+func runProbe() async -> String {
   let args = CommandLine.arguments
   func arg(_ k: String) -> String? { args.firstIndex(of: k).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } }
   let tag = arg("-tag") ?? "x"
-  let out = URL.documentsDirectory.appending(path: "probe-\(tag).txt")
-  var lines: [String] = []
-  func log(_ s: String) {
-    let l = "\(Date().formatted(date: .omitted, time: .standard)) \(s)"
-    lines.append(l); try? lines.joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
+  let out = URL.documentsDirectory.appending(path: "probe-\(tag).json")
+  let stamp = URL.documentsDirectory.appending(path: "last-probe-end.txt")
+  let last = (try? String(contentsOf: stamp, encoding: .utf8)).flatMap(Double.init)
+  var r = Report(tag: tag, args: Array(args.dropFirst()), osBuild: osBuild(), startedAt: Date().ISO8601Format(),
+                 secondsSinceLastProbe: last.map { Date().timeIntervalSince1970 - $0 },
+                 thermalStart: ProcessInfo.processInfo.thermalState.rawValue, freeDiskMBStart: freeDiskMB(),
+                 availMemMBStart: Int(os_proc_available_memory() / 1_048_576))
+  func save() { if let d = try? JSONEncoder().encode(r) { try? d.write(to: out, options: .atomic) } }
+  save()
+  if args.contains("-wipePayload") {
+    r.loads.append(Load(fn: "wipePayload", ok: true, freeDiskMB: freeDiskMB(), note: "removed \(wipePayload()) files"))
+    save()
   }
-  let root = URL.applicationSupportDirectory.appending(path: "EmbeddingGemma/local/file-8a7c99c73b81ba34/model.mlmodelc")
-  let names = (arg("-hold") ?? "").split(separator: ",").map(String.init)
-  log("start tag=\(tag) n=\(names.count) footprint=\(footprintMB())MB")
-  let units: MLComputeUnits = switch arg("-units") { case "gpu": .cpuAndGPU; case "all": .all; case "cpu": .cpuOnly; default: .cpuAndNeuralEngine }
-  log("units=\(arg("-units") ?? "ne") thermal=\(ProcessInfo.processInfo.thermalState.rawValue)")
-  var held: [MLModel] = []
-  for fn in names {
-    for attempt in 1...3 {
-      let c = MLModelConfiguration(); c.functionName = fn; c.computeUnits = units
-      log("loading \(fn) attempt \(attempt)")
-      let t = Date()
-      do {
-        held.append(try await MLModel.load(contentsOf: root, configuration: c))
-        log("OK \(fn) \(Int(Date().timeIntervalSince(t) * 1000))ms held=\(held.count) footprint=\(footprintMB())MB")
-        break
-      } catch {
-        log("FAIL \(fn) \(Int(Date().timeIntervalSince(t) * 1000))ms held=\(held.count) footprint=\(footprintMB())MB \((error as NSError).localizedDescription.prefix(50))")
+  let fns = (arg("-fns") ?? "").split(separator: ",").map(String.init)
+  do {
+    let (compiled, compileMS) = try await compiledModel(arg("-model") ?? "b70")
+    r.compileMS = compileMS
+    var url = compiled
+    if arg("-from") == "tmp" {  // H4: same bytes, a new path every launch
+      url = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mlmodelc")
+      try FileManager.default.copyItem(at: compiled, to: url)
+    }
+    r.modelPath = url.path
+    r.modelFiles = fileFacts(url)
+    save()
+    let units: MLComputeUnits = switch arg("-units") {
+    case "gpu": .cpuAndGPU
+    case "all": .all
+    case "cpu": .cpuOnly
+    default: .cpuAndNeuralEngine
+    }
+    let tries = max(1, Int(arg("-retries") ?? "1") ?? 1)
+    for fn in fns {
+      for attempt in 1...tries {
+        let c = MLModelConfiguration()
+        c.computeUnits = units
+        if !args.contains("-noFunctionName") { c.functionName = fn }
+        var load = Load(fn: fn, attempt: attempt)
+        let t = Date()
+        do {
+          var m: MLModel? = arg("-api") == "sync" ? try MLModel(contentsOf: url, configuration: c)
+                                                  : try await MLModel.load(contentsOf: url, configuration: c)
+          load.ok = m != nil
+          m = nil
+        } catch { load.error = "\(error)" }
+        load.ms = Int(Date().timeIntervalSince(t) * 1000)
+        (load.footprintMB, load.peakMB) = footprint()
+        load.thermal = ProcessInfo.processInfo.thermalState.rawValue
+        load.freeDiskMB = freeDiskMB()
+        r.loads.append(load)
+        save()
+        if load.ok { break }
       }
     }
+    let failed = fns.filter { fn in !r.loads.contains { $0.fn == fn && $0.ok } }
+    r.status = failed.isEmpty ? "done" : "error"
+  } catch {
+    r.status = "error"
+    r.loads.append(Load(fn: "setup", error: "\(error)", freeDiskMB: freeDiskMB()))
   }
-  log("holding \(held.count) footprint=\(footprintMB())MB")
-  held.removeAll()
-  log("released all footprint=\(footprintMB())MB")
-  // -seq a,b,c: load each, log, release before the next
-  for fn in (arg("-seq") ?? "").split(separator: ",").map(String.init) {
-    for attempt in 1...2 {
-      let c = MLModelConfiguration(); c.functionName = fn; c.computeUnits = .cpuAndNeuralEngine
-      let t = Date()
-      do {
-        var m: MLModel? = try await MLModel.load(contentsOf: root, configuration: c)
-        log("seq OK \(fn) \(Int(Date().timeIntervalSince(t) * 1000))ms loaded footprint=\(footprintMB())MB")
-        _ = m; m = nil
-        log("seq released \(fn) footprint=\(footprintMB())MB")
-        break
-      } catch { log("seq FAIL \(fn) attempt \(attempt) \(Int(Date().timeIntervalSince(t) * 1000))ms") }
-    }
-  }
-  log("DONE")
+  r.thermalEnd = ProcessInfo.processInfo.thermalState.rawValue
+  r.freeDiskMBEnd = freeDiskMB()
+  r.finishedAt = Date().ISO8601Format()
+  save()
+  try? "\(Date().timeIntervalSince1970)".write(to: stamp, atomically: true, encoding: .utf8)
+  return "DONE \(r.status)"
 }
