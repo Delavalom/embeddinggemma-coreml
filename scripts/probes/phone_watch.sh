@@ -8,5 +8,5 @@ for i in $(seq 1 $3); do
     --subdirectory Library --json-output $f >/dev/null 2>&1
   free=$(ideviceinfo -u $U -q com.apple.disk_usage 2>/dev/null | awk '/^AmountDataAvailable/{printf "%.0f", $2/1048576}')
   (cd $REPO && uv run --exact --group convert python -c "import json,sys; from scripts.probes.e5_listing import load; print(sys.argv[1][-11:-5], 'free_mb', sys.argv[2], json.dumps(load(sys.argv[1])['totals']))" $f $free)
-  [ $i -lt $3 ] && sleep $(( $2 * 60 ))
+  if [ $i -lt $3 ]; then sleep $(( $2 * 60 )); fi
 done
