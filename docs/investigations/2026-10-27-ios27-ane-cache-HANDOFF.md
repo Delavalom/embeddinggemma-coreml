@@ -1,5 +1,9 @@
 # Handoff: iOS 27 Neural Engine compile cache — find the exact cause, with evidence (2026-10-27)
 
+> **Plan written 2026-10-27 12:30:** `docs/superpowers/plans/2026-10-27-ios27-ane-cache-investigation.md` (start
+> there). It corrects F2: a JSON listing shows that **no** finished cache entry on the phone holds compiled files.
+> The 9 folders hold empty function folders (plan §0, N1; `ev/phone-e5-files-1215.txt`).
+
 Read this whole file before doing anything. Then read `ROLL-HANDOFF.md` (repo parent folder) and
 `docs/investigations/2026-10-26-s6-ios27-load-memory.md`.
 

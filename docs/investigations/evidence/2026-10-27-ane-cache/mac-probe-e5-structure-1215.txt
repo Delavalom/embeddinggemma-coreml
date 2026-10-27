@@ -1,0 +1,39 @@
+# Mac (M1 Pro, macOS 26.6.2 25G83) E5 cache of the `probe` executable (scripts/probes/mac_load_probe.swift), read 2026-10-27 12:15 AST
+key folders with model.milhash: 34; file content == folder name: 34; differs: 0
+key folders holding a .bundle: 36
+10-26 10:34 F34CE88D ['embed_text_16'] ['H13S.e5'] 268 MB
+10-26 10:35 F500F333 ['embed_text_32'] ['H13S.e5'] 268 MB
+10-26 10:37 38464BC9 ['embed_text_64'] ['H13S.e5'] 268 MB
+10-26 10:38 664F480B [] [] 0 MB
+10-26 11:08 92FA332D [] ['H13S.e5'] 0 MB
+10-26 11:11 F34CE88D [] ['H13S.e5'] 0 MB
+10-26 11:12 F500F333 [] ['H13S.e5'] 0 MB
+10-26 11:13 EC8067BE ['embed_image_280_square'] [] 0 MB
+10-26 11:17 A0DBBFAC ['embed_text_16'] ['H13S.e5'] 268 MB
+10-26 11:26 77155838 ['embed_text_16'] ['H13S.e5'] 0 MB
+10-26 11:27 DAA93DFC [] ['H13S.e5'] 0 MB
+10-26 11:28 5D73D7C9 ['embed_text_64'] ['H13S.e5'] 0 MB
+10-26 11:29 030A8706 ['embed_text_128'] ['H13S.e5'] 268 MB
+10-26 11:30 81EAB52B ['embed_image_70_tall'] [] 0 MB
+10-26 11:33 BE757D33 ['embed_image_70_portrait'] ['H13S.e5'] 0 MB
+10-26 11:35 7056D112 [] [] 0 MB
+10-26 11:38 0B5FCE4A ['embed_image_70_landscape'] [] 0 MB
+10-26 11:41 DC4FF57A ['embed_image_70_wide'] [] 0 MB
+10-26 12:02 892C6718 ['embed_text_32'] [] 0 MB
+10-26 12:03 6AC463CE ['embed_text_64'] [] 268 MB
+10-26 12:04 5B76B100 ['embed_text_128'] ['H13S.e5'] 268 MB
+10-26 12:05 398BD24C ['embed_image_70_tall'] ['H13S.e5'] 0 MB
+10-26 12:08 0CCDD076 ['embed_image_70_portrait'] ['H13S.e5'] 0 MB
+10-26 12:10 06B39451 ['embed_image_70_square'] [] 0 MB
+10-26 12:13 33F92D97 ['embed_image_70_landscape'] [] 0 MB
+10-26 12:15 A867C5A9 [] ['H13S.e5'] 0 MB
+10-26 12:17 CC80C65F ['embed_text_16'] [] 268 MB
+10-26 12:19 E319681F ['embed_text_16'] [] 268 MB
+10-26 12:21 0FADE3AE ['embed_text_32'] ['H13S.e5'] 268 MB
+10-26 12:22 E6C964C1 ['embed_text_64'] ['H13S.e5'] 268 MB
+10-26 12:23 A907E50D ['embed_text_128'] ['H13S.e5'] 268 MB
+10-26 12:24 BA16B383 ['embed_image_280_tall'] [] 0 MB
+10-26 12:28 3497511F [] [] 0 MB
+10-26 12:32 07CBCC50 ['embed_image_280_square'] [] 0 MB
+10-26 12:35 6321A241 [] ['H13S.e5'] 0 MB
+10-26 12:38 3954185E [] ['H13S.e5'] 0 MB
