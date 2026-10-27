@@ -16,8 +16,12 @@ targets:
       - path: ProbeModels
         type: folder
         buildPhase: resources
+    # E1g (`-from group`) needs the App Group group.com.delavalom.egcm.demo registered for this bundle id, which only
+    # the Developer Portal web session can do; then add `entitlements: {path: Probe.entitlements, properties:
+    # {com.apple.security.application-groups: [group.com.delavalom.egcm.demo]}}` here.
     settings:
       base:
+        CURRENT_PROJECT_VERSION: "1"  # override on the xcodebuild command line to build an "update"
         PRODUCT_BUNDLE_IDENTIFIER: com.delavalom.egcm.demo
         PRODUCT_NAME: PhotoSearchDemo
         SWIFT_VERSION: "6.0"

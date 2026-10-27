@@ -13,9 +13,12 @@ import os
 //   -noFunctionName     load without config.functionName (the 1-function package t16)
 //   -units ne|gpu|cpu|all
 //   -api async|sync     MLModel.load(contentsOf:configuration:) (default) or MLModel(contentsOf:configuration:)
-//   -from as|tmp        load from Application Support (default, like ModelStore) or from a fresh tmp copy
+//   -from as|tmp|group  load from Application Support (default, like ModelStore), from a fresh tmp copy, or from a
+//                       copy made once in the App Group container (same path and inodes across app updates)
 //   -retries N          tries per function (default 1: the experiments want the raw failure)
 //   -wipePayload        delete every regular file under our E5 cache's *.bundle folders first (H6), keep folders
+//   -fill MB            append MB of non-purgeable data to Documents/filler.bin (E1e: low free space, one variable)
+//   -unfill             delete Documents/filler.bin
 
 @main struct ProbeApp: App {
   @State private var status = "probe"
@@ -113,6 +116,32 @@ func wipePayload() -> Int {
   return removed
 }
 
+let fillerURL = URL.documentsDirectory.appending(path: "filler.bin")
+
+/// Appends `mb` MB to Documents/filler.bin in 64 MB writes (real blocks: random bytes, so nothing can be shared or
+/// compressed), excluded from backup. Returns the MB written; stops early if a write fails (disk full).
+func fill(mb: Int) -> Int {
+  if !FileManager.default.fileExists(atPath: fillerURL.path) {
+    FileManager.default.createFile(atPath: fillerURL.path, contents: nil)
+    var v = URLResourceValues()
+    v.isExcludedFromBackup = true
+    var u = fillerURL
+    try? u.setResourceValues(v)
+  }
+  guard let h = try? FileHandle(forWritingTo: fillerURL) else { return 0 }
+  defer { try? h.close() }
+  _ = try? h.seekToEnd()
+  var chunk = Data(count: 64 << 20)
+  chunk.withUnsafeMutableBytes { arc4random_buf($0.baseAddress!, $0.count) }
+  var written = 0
+  while written + 64 <= mb {
+    do { try h.write(contentsOf: chunk) } catch { break }
+    written += 64
+  }
+  try? h.synchronize()
+  return written
+}
+
 /// Compiles the bundled package once into Application Support/probe/<model>.mlmodelc (like ModelStore) and reuses it
 /// on later launches. Returns the compiled URL and the compile time if it compiled now.
 func compiledModel(_ name: String) async throws -> (URL, Int?) {
@@ -146,7 +175,27 @@ func runProbe() async -> String {
     r.loads.append(Load(fn: "wipePayload", ok: true, freeDiskMB: freeDiskMB(), note: "removed \(wipePayload()) files"))
     save()
   }
+  if let mb = arg("-fill").flatMap(Int.init) {
+    let before = freeDiskMB()
+    let n = fill(mb: mb)
+    r.loads.append(Load(fn: "fill", ok: n >= mb - 64, ms: n, freeDiskMB: freeDiskMB(), note: "wrote \(n) MB, app free \(before)→\(freeDiskMB())"))
+    save()
+  }
+  if args.contains("-unfill") {
+    let size = (try? FileManager.default.attributesOfItem(atPath: fillerURL.path)[.size] as? Int) ?? 0
+    let ok = (try? FileManager.default.removeItem(at: fillerURL)) != nil
+    r.loads.append(Load(fn: "unfill", ok: ok, ms: size / 1_048_576, freeDiskMB: freeDiskMB(), note: "removed \(size / 1_048_576) MB"))
+    save()
+  }
   let fns = (arg("-fns") ?? "").split(separator: ",").map(String.init)
+  if fns.isEmpty && !args.contains("-model") {  // a fill/unfill/wipe-only launch: don't compile the package
+    r.status = "done"
+    r.thermalEnd = ProcessInfo.processInfo.thermalState.rawValue
+    r.freeDiskMBEnd = freeDiskMB()
+    r.finishedAt = Date().ISO8601Format()
+    save()
+    return "DONE \(r.status)"
+  }
   do {
     let (compiled, compileMS) = try await compiledModel(arg("-model") ?? "b70")
     r.compileMS = compileMS
@@ -154,6 +203,15 @@ func runProbe() async -> String {
     if arg("-from") == "tmp" {  // H4: same bytes, a new path every launch
       url = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mlmodelc")
       try FileManager.default.copyItem(at: compiled, to: url)
+    }
+    if arg("-from") == "group" {  // E1g: a path outside the app container
+      guard let g = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.delavalom.egcm.demo")
+      else { throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: "app group container"]) }
+      url = g.appending(path: "probe/\(compiled.lastPathComponent)")
+      if !FileManager.default.fileExists(atPath: url.path) {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: compiled, to: url)
+      }
     }
     r.modelPath = url.path
     r.modelFiles = fileFacts(url)
