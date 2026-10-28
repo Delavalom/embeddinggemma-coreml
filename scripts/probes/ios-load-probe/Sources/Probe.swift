@@ -57,6 +57,8 @@ struct Report: Codable {
   var freeDiskMBStart: Int
   var freeDiskMBEnd = 0
   var availMemMBStart: Int
+  /// `volumeAvailableCapacity` (no purgeable space), to compare with ideviceinfo's AmountDataAvailable.
+  var realFreeMBStart = realFreeMB()
   var modelPath = ""
   var modelFiles: [String: [String: String]] = [:]  // file → size, mtime, inode
   var compileMS: Int?
@@ -79,6 +81,11 @@ func footprint() -> (Int, Int) {
 func freeDiskMB() -> Int {
   let v = try? URL.documentsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
   return Int((v?.volumeAvailableCapacityForImportantUsage ?? -1_048_576) / 1_048_576)
+}
+
+func realFreeMB() -> Int {
+  let v = try? URL.documentsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+  return (v?.volumeAvailableCapacity ?? -1_048_576) / 1_048_576
 }
 
 func osBuild() -> String {
