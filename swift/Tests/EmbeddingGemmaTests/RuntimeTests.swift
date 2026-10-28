@@ -112,7 +112,7 @@ struct RuntimeTests {
   @Test func prewarmLoadsNineFunctionsAndUnloadReleasesThem() async throws {
     let m = try await Self.load(budget: .tokens70)
     #expect(await m.loadedFunctions.isEmpty)
-    try await m.prewarm()
+    try await m.prewarm(keepingFree: 0)  // independent of this machine's free space
     #expect(await m.loadedFunctions == (EmbeddingGemma.textFunctions + EmbeddingGemma.imageFunctions(budget: 70)).sorted())
     #expect(await m.loadedFunctions.count == 9)
     await m.unloadFunctions()
@@ -120,6 +120,23 @@ struct RuntimeTests {
     _ = try await m.embed(query: "receipts")  // reloads on demand
     #expect(await m.loadedFunctions == ["embed_text_16"])
     await #expect(throws: EmbeddingGemmaError.self) { try await m.prewarm(["no_such_function"]) }
+  }
+
+  /// Below the reserve, `prewarm` loads nothing new and says how much is free; functions already loaded pass, and
+  /// the rest still load on first use.
+  @Test func prewarmStopsBelowTheFreeSpaceReserve() async throws {
+    let m = try await Self.load(budget: .tokens70)
+    do {
+      try await m.prewarm(keepingFree: .max)
+      Issue.record("expected insufficientStorage")
+    } catch EmbeddingGemmaError.insufficientStorage(let required, let available) {
+      #expect(required == .max)
+      #expect(available > 0)
+    }
+    #expect(await m.loadedFunctions.isEmpty)
+    _ = try await m.embed(query: "receipts")
+    try await m.prewarm(["embed_text_16"], keepingFree: .max)
+    #expect(await m.loadedFunctions == ["embed_text_16"])
   }
 
   /// Queries are not queued behind image preprocessing: both run at once and give the same vectors as alone.

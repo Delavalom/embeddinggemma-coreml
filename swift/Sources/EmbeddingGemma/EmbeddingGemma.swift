@@ -120,11 +120,28 @@ public actor EmbeddingGemma {
     return try CoreMLIO.truncateAndNormalize(try await function(name).embed(tokens), dimensions: dimensions, function: name)
   }
 
+  /// Free space `prewarm` keeps by default: 3.5 GB of `volumeAvailableCapacity` (space not counting purgeable files).
+  ///
+  /// iOS 27.0.1 deleted the compiled Neural Engine files of our cache (`Library/Caches`, purgeable) whenever true free
+  /// space fell below about 2 GB once other purgeable data was gone: 3 of 3 deliberate rounds, 0 of 4 at 2.25 GB or
+  /// more, with the cleanup aiming for about 2.6 GB free; the next launch then compiled again, 45–120 s per function
+  /// (docs/investigations/evidence/2026-10-27-ane-cache/e1-phone.md, E1e). A cold compile of one function writes about
+  /// 0.5 GB (E1f: 4.2 GB for all nine plus the compiled model). So `prewarm` stops while a compile could still push the
+  /// phone into that range by itself, which is how the cache was lost on 2026-10-27 (run 11).
+  public static let prewarmReserve: Int64 = 3_500 * 1_048_576
+
   /// Loads functions now (default: the four text functions and the five image functions of `imageBudget`), so the
-  /// first embeddings do not pay the load. Unknown names fail with `.modelLoadFailed`.
-  public func prewarm(_ names: [String]? = nil) async throws {
+  /// first embeddings do not pay the load. Unknown names fail with `.modelLoadFailed`. Before each function, fails
+  /// with `.insufficientStorage` if less than `keepingFree` bytes are free (see `prewarmReserve`); functions loaded
+  /// so far stay loaded, and the rest still load on first use.
+  public func prewarm(_ names: [String]? = nil, keepingFree reserve: Int64 = prewarmReserve) async throws {
     let all = names ?? (Self.textFunctions + Self.imageFunctions(budget: imageBudget))
-    for name in all { _ = try await function(name) }
+    for name in all {
+      if functions[name] == nil, let free = ModelStore.realFreeSpace(compiledModel), free < reserve {
+        throw EmbeddingGemmaError.insufficientStorage(required: reserve, available: free)
+      }
+      _ = try await function(name)
+    }
   }
 
   /// Releases every loaded function (they reload on next use), e.g. on a memory warning.

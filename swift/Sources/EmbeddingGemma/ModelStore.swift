@@ -209,6 +209,12 @@ public struct ModelStore: Sendable {
   }
 
   /// Free space for "important" data (what the system would free up for us), else plain free space.
+  /// Free space on `url`'s volume without purgeable files (`volumeAvailableCapacity`), the space whose shortage makes
+  /// iOS purge caches, ours included.
+  package static func realFreeSpace(_ url: URL) -> Int64? {
+    (try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity.map(Int64.init)
+  }
+
   package static let volumeCapacity: @Sendable (URL) -> Int64? = { url in
     let v = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
     return v?.volumeAvailableCapacityForImportantUsage ?? v?.volumeAvailableCapacity.map(Int64.init)
