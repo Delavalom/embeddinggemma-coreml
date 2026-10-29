@@ -5,7 +5,7 @@ This repo converts Google DeepMind's [`google/embeddinggemma-2`](https://hugging
 Engine. Every stage of the conversion is checked against the original model. The repo also ships a Swift package
 for using the model in iOS and macOS apps.
 
-- **The model:** on Hugging Face at [`Delavalom/embeddinggemma-2-coreml`](https://huggingface.co/Delavalom/embeddinggemma-2-coreml).
+- **The model:** on Hugging Face at [`delavalom/embeddinggemma-2-coreml`](https://huggingface.co/delavalom/embeddinggemma-2-coreml).
   Its model card has the measured accuracy, speed, size, license terms and limitations.
 - **The Swift package:** `EmbeddingGemma` (loading, download with checksum verification, tokenizer, image
   preprocessing) and `EmbeddingIndex` (an on-disk vector index). Supports iOS 18+ and macOS 15+. See

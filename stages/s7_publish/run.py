@@ -40,7 +40,7 @@ DEFAULT_TAG = "v1.0.0"
 DEFAULT_MODEL_SWIFT = Path("swift/Sources/EmbeddingGemma/DefaultModel.swift")
 RESULTS_MD = Path("docs/RESULTS.md")
 # The Hugging Face repo the docs name. HF_REPO_TARGET must equal it (preflight), so the docs and the upload agree.
-DOCUMENTED_HF_REPO = "Delavalom/embeddinggemma-2-coreml"
+DOCUMENTED_HF_REPO = "delavalom/embeddinggemma-2-coreml"
 REPO_DOCS = (Path("README.md"), Path("docs/swift-package.md"))
 _REPO = re.compile(r"[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+")
 _SHA = re.compile(r"[0-9a-f]{40}")

@@ -110,7 +110,7 @@ APIs.
 
 The package is gated end to end against the original model (stage s5: identical token ids, pixels within 1/255,
 min cosine >= 0.99 over 600 vectors). Measured numbers, including iPhone speed and memory, are in the
-[model card](https://huggingface.co/Delavalom/embeddinggemma-2-coreml) and in [`docs/RESULTS.md`](RESULTS.md).
+[model card](https://huggingface.co/delavalom/embeddinggemma-2-coreml) and in [`docs/RESULTS.md`](RESULTS.md).
 
 ## Development
 

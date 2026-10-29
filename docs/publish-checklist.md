@@ -1,6 +1,6 @@
 # Pre-publish checklist (v1.0.0)
 
-Go through this list before `HF_REPO_TARGET=Delavalom/embeddinggemma-2-coreml just publish --confirm`. That one command does every
+Go through this list before `HF_REPO_TARGET=delavalom/embeddinggemma-2-coreml just publish --confirm`. That one command does every
 public step in order: Hugging Face upload, pinning `DefaultModel.swift`, the tag, the repo visibility flip, the
 push and the GitHub release (`stages/s7_publish/README.md`). **The founder's approval for it covers all of those
 steps at once.** If they should be approved separately, do not run s7; do the steps by hand in its order instead.
@@ -15,7 +15,7 @@ Items marked **[founder]** need explicit founder approval. Nothing else here is 
       Checked with `swift package describe` and `swift build` at the repo root (CI builds it too). Keep the two
       manifests in step.
 - [x] **The Hugging Face repo name is one value.** `stages/s7_publish/run.py` `DOCUMENTED_HF_REPO` =
-      `Delavalom/embeddinggemma-2-coreml`, which `README.md` and `docs/swift-package.md` name (a test checks it).
+      `delavalom/embeddinggemma-2-coreml`, which `README.md` and `docs/swift-package.md` name (a test checks it).
       s7's preflight refuses an `HF_REPO_TARGET` those docs do not name. The model card takes the repo from s7.
       s7 then uses the repo id exactly as the Hub returns it (case included) and prints
       `PUBLISHED_MODEL {"repo", "revision", "manifest_sha256"}`: the three values apps pin. Create the HF repo
