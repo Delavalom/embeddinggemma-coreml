@@ -17,6 +17,8 @@ from egcm.report import Report, read_report
 
 TEMPLATE = Path(__file__).with_name("model_card.md")
 PENDING = "pending"
+# A budget a device did not run: each iPhone benchmarks only its own budget (ImageBudget.auto, ADR-0010).
+NOT_RUN = "not run"
 GITHUB_REPO = "Delavalom/embeddinggemma-coreml"
 
 
@@ -66,13 +68,22 @@ def provenance_rows(root: Path) -> str:
     return "\n".join(rows)
 
 
+def s6_ms_280(s6: Report | None) -> str:
+    """The worst device's budget-280 median ("41.2 ms"), or why there is none: only A17 Pro and newer run 280."""
+    v = (s6.metrics or {}).get("ms_per_image_280_median") if s6 else None
+    if s6 and v is None:
+        return "not measured (no A17 Pro or newer iPhone ran s6 yet)"
+    return f"{_num(v, 1)} ms"
+
+
 def device_rows(s6: Report | None) -> str:
     devices = _get(s6.details, "devices") if s6 else None
     if not devices:
         return f"| {PENDING}: filled from s6_device | - | - | - | - | - |"
     rows = []
     for model, d in sorted(devices.items()):
-        ms = {b: _num(_get(d, "budgets", b, "ms_per_image", "median"), 1) for b in ("70", "280")}
+        ms = {b: _num(_get(d, "budgets", b, "ms_per_image", "median"), 1) if b in d.get("budgets", {}) else NOT_RUN
+              for b in ("70", "280")}
         rows.append(f"| {model} | {d.get('os_version', '-')} | {ms['70']} | {ms['280']} "
                     f"| {_num(_get(d, 'query', 'ms', 'median'), 1)} | {_num(d.get('peak_rss_mb'), 0)} |")
     return "\n".join(rows)
@@ -146,7 +157,7 @@ def values(root: Path, manifests: dict[str, dict] | None = None) -> dict[str, st
         "s5_cos": _num(m(s5, "min_cosine"), 5), "s5_pixel": _num(m(s5, "max_pixel_abs_diff"), 6),
         "s5_runtime": _cos(m(s5, "min_cosine_runtime")),
         "s5_tokens": str(m(s5, "token_ids_identical")) if s5 else PENDING,
-        "s6_ms_70": _num(m(s6, "ms_per_image_70_median"), 1), "s6_ms_280": _num(m(s6, "ms_per_image_280_median"), 1),
+        "s6_ms_70": _num(m(s6, "ms_per_image_70_median"), 1), "s6_ms_280": s6_ms_280(s6),
         "s6_ms_query": _num(m(s6, "ms_per_query_median"), 1), "s6_rss": _num(m(s6, "max_peak_rss_mb"), 0),
         "s6_devices": device_rows(s6),
         "provenance": provenance_rows(root),

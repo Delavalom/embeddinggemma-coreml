@@ -134,14 +134,15 @@ build Mac is an M1 Pro with macOS 26. `embed_text_16` takes $ms_text_16 ms and `
 $ms_image_70_square ms. In every function, at least $ane_fraction of the ops are placed on the Neural Engine (`MLComputePlan`, minimum
 over the 14 functions, measured on the package the two budget packages were split from).
 
-**iPhone** (s6, PhotoSearchDemo's benchmark: the newest 1,000 photos at budget 70, then 200 at budget 280, and 20
-queries; times cover preprocessing + prediction):
+**iPhone** (s6, PhotoSearchDemo's benchmark: each iPhone runs its own budget, `ImageBudget.auto`, 280 on A17 Pro
+and newer and 70 otherwise: the newest 1,000 photos at 70 or 200 at 280, and 20 queries; times cover preprocessing +
+prediction):
 
 | device | iOS | ms per image, 70 (median) | ms per image, 280 (median) | ms per query (median) | peak memory, MB |
 |---|---|---|---|---|---|
 $s6_devices
 
-Worst device: $s6_ms_70 ms per image at 70, $s6_ms_280 ms at 280, $s6_ms_query ms per query, peak $s6_rss MB (the
+Worst device: $s6_ms_70 ms per image at 70, $s6_ms_280 at 280, $s6_ms_query ms per query, peak $s6_rss MB (the
 gate is 800 MB; the target for budget 70 is 60 ms, which is recorded, not gated).
 
 **Storage:** the Swift package downloads the archive of the device's image budget, `b<budget>/$archive`

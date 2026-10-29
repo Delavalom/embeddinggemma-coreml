@@ -207,7 +207,8 @@ def test_model_card_numbers_come_from_the_reports(tmp_path):
     assert (v["recall_70"], v["recall_280"], v["ms_text_16"]) == ("0.962", "0.966", "4.4")
     assert v["base_revision"] == "r" * 40 and v["raw_vs_bucket_70"] == "0.916" and v["raw_vs_bucket_280"] == "pending"
     assert v["worst_images"].startswith("i161 0.99133 (`embed_image_280_landscape`), i141 0.99322")
-    assert v["s6_devices"] == "| iPhone16,1 | 26.0 | 41.2 | pending | 7.0 | 612 |"
+    assert v["s6_devices"] == "| iPhone16,1 | 26.0 | 41.2 | not run | 7.0 | 612 |"  # each device runs its own budget
+    assert v["s6_ms_280"].startswith("not measured")
     assert "| s0_reference | passed | `aaaaaaaaaaaa` | `cccccccccccccccc` |" in v["provenance"]
     card = s7.model_card("me/model", "results", root=tmp_path)
     assert "**0.99791**" in card and "| iPhone16,1 | 26.0 |" in card
