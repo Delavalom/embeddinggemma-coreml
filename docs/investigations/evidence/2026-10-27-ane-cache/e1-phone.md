@@ -104,3 +104,20 @@ Raw data: `~/egcm-evidence-raw/2026-10-27/e1f-r{1,2,3}/`, console `e1f-console.t
   not new in E1f.
 - Consequence: the package's existing retry (`FunctionLoad.withRetries`, 3 tries, backoff and thermal wait) covers this
   failure; the probe shows that even an immediate retry is enough in 7/7 cases.
+
+## Long gaps (overnight soak, no reinstall since the `soak1-0` seed)
+
+Raw: `~/egcm-evidence-raw/2026-10-28/soak1-<n>/`; log `~/egcm-evidence-raw/soak1.log`. Pass: every function < 10 s.
+
+| Launch | Started (AST) | Gap since previous | Slowest load | Result | Peak MB | True free (`AmountDataAvailable`) | Thermal |
+|---|---|---|---|---|---|---|---|
+| soak1-1 | 2026-10-28 09:43:55 | 48,392 s (13.4 h) | 3.87 s (`embed_image_70_landscape`) | WARM, 9/9 ok | 575 | 16.2 GB | 0 → 0 |
+| soak1-2 | 2026-10-28 22:05:22 | 44,453 s (12.3 h, a day of normal use) | 3.84 s (`embed_image_70_wide`) | WARM, 9/9 ok | 576 | 8.0 GB | 0 → 0 |
+
+soak1-1 was 1.5 h late: the phone was off USB until ~09:29, then locked at the 5-minute tries (devicectl 4016 while
+disconnected; launch refused while locked). It was run by hand with the same probe arguments the moment the phone was
+unlocked; nothing was installed in between. Cache after: 18 bundles, all with payload. soak1-2 likewise: the job's
+tries from 21:45 failed while the phone was locked; run by hand at 22:05, same arguments, cache after unchanged
+(18 bundles, all with payload).
+
+**Result: pass.** Compiled functions survive overnight charging and a day of normal use with no reinstall.
