@@ -167,7 +167,7 @@ Remove the old `-hold`/`-seq` modes. `run.sh` stays in git history and is replac
 # usage: phone_run.sh TAG <probe args...>   e.g. phone_run.sh e1a-r1-A -fns embed_text_16
 # Writes ~/egcm-evidence-raw/<date>/<TAG>/{pre,post}.json, probe.json, summary.json; prints the summary line.
 set -u
-U=${UDID:-00008110-0014594C0A98401E}; APP=com.delavalom.egcm.demo; TAG=$1; shift
+U=${UDID:?set UDID}; APP=com.delavalom.egcm.demo; TAG=$1; shift
 D=~/egcm-evidence-raw/$(date +%F)/$TAG; mkdir -p $D
 REPO=$(git -C "$(dirname $0)" rev-parse --show-toplevel)
 list() { xcrun devicectl device info files --device $U --domain-type appDataContainer --domain-identifier $APP \
@@ -206,7 +206,7 @@ EOF
 ```bash
 #!/bin/zsh
 # usage: phone_watch.sh TAG MINUTES COUNT   lists the E5 cache COUNT times, MINUTES apart, without launching anything
-U=${UDID:-00008110-0014594C0A98401E}; TAG=$1; D=~/egcm-evidence-raw/$(date +%F)/$TAG; mkdir -p $D
+U=${UDID:?set UDID}; TAG=$1; D=~/egcm-evidence-raw/$(date +%F)/$TAG; mkdir -p $D
 REPO=$(git -C "$(dirname $0)" rev-parse --show-toplevel)
 for i in $(seq 1 $3); do
   f=$D/watch-$(date +%H%M%S).json
@@ -223,9 +223,9 @@ done
 chmod +x scripts/probes/phone_run.sh scripts/probes/phone_watch.sh scripts/probes/ios-load-probe/build-models.sh
 scripts/probes/ios-load-probe/build-models.sh
 cd scripts/probes/ios-load-probe && mise exec -- xcodegen generate && cd -
-xcodebuild -project scripts/probes/ios-load-probe/Probe.xcodeproj -scheme Probe -destination id=00008110-0014594C0A98401E \
+xcodebuild -project scripts/probes/ios-load-probe/Probe.xcodeproj -scheme Probe -destination id=<UDID> \
   -allowProvisioningUpdates -derivedDataPath /tmp/probe-dd build
-xcrun devicectl device install app --device 00008110-0014594C0A98401E /tmp/probe-dd/Build/Products/Debug-iphoneos/PhotoSearchDemo.app
+xcrun devicectl device install app --device <UDID> /tmp/probe-dd/Build/Products/Debug-iphoneos/PhotoSearchDemo.app
 scripts/probes/phone_run.sh smoke -model b70 -fns embed_text_16 -units cpu
 ```
 

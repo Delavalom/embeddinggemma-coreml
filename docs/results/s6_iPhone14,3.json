@@ -1,0 +1,142 @@
+{
+  "stage": "s6_device",
+  "status": "passed",
+  "passed": true,
+  "failures": [],
+  "metrics": {
+    "min_devices": 1,
+    "max_peak_rss_mb": 630.0647583007812,
+    "max_cold_compile_peak_mb": 1517.6593780517578,
+    "ms_per_image_70_median": 63.958292,
+    "ms_per_image_280_median": null,
+    "ms_per_query_median": 6.683708
+  },
+  "gate_values": {
+    "max_peak_rss_mb": 800,
+    "max_cold_compile_peak_mb": 2100,
+    "min_devices": 1
+  },
+  "details": {
+    "target_ms_per_image_70": 60,
+    "meets_target_70": {
+      "iPhone14,3": false
+    },
+    "available_memory_mb_at_launch": {
+      "iPhone14,3": 3063.3265533447266
+    },
+    "devices": {
+      "iPhone14,3": {
+        "budgets": {
+          "70": {
+            "function_ms": {
+              "embed_image_70_landscape": 3758.497083,
+              "embed_image_70_portrait": 4232.11875,
+              "embed_image_70_square": 4009.50675,
+              "embed_image_70_tall": 3729.180125,
+              "embed_image_70_wide": 4092.831708,
+              "embed_text_128": 3459.728708,
+              "embed_text_16": 3430.752625,
+              "embed_text_32": 3388.901042,
+              "embed_text_64": 3503.3085
+            },
+            "images": 1000,
+            "load_ms": 35141.605542,
+            "ms_per_image": {
+              "count": 1000,
+              "first": 84.310667,
+              "median": 63.958292,
+              "p90": 80.372708
+            },
+            "skipped": 0,
+            "thermal_state_after": "nominal"
+          }
+        },
+        "device_model": "iPhone14,3",
+        "finished_at": "2026-10-29T12:45:44Z",
+        "model_revision": "file-99a7d34084f9186b",
+        "model_revisions": {
+          "70": "file-99a7d34084f9186b"
+        },
+        "os_version": "27.0.1",
+        "peak_rss_mb": 630.0647583007812,
+        "photos_available": 1000,
+        "query": {
+          "ms": {
+            "count": 20,
+            "first": 145.725709,
+            "median": 6.683708,
+            "p90": 7.74775
+          },
+          "queries": 20
+        },
+        "run_id": "4db667f5d8dd4547b474b224a48e1709",
+        "started_at": "2026-10-29T12:38:40Z",
+        "status": "done",
+        "thermal_state": "nominal",
+        "compile": {
+          "available_memory_mb_at_launch": 3063.3265533447266,
+          "budget_function_ms": {
+            "70": {
+              "embed_image_70_landscape": 319872.452958,
+              "embed_image_70_portrait": 153628.279042,
+              "embed_image_70_square": 166841.0805,
+              "embed_image_70_tall": 128143.791542,
+              "embed_image_70_wide": 130552.630917,
+              "embed_text_128": 54264.99,
+              "embed_text_16": 48420.858667,
+              "embed_text_32": 50033.323833,
+              "embed_text_64": 52917.6455
+            }
+          },
+          "device_model": "iPhone14,3",
+          "finished_at": "2026-10-29T12:38:30Z",
+          "free_disk_mb_at_launch": 32493.47264289856,
+          "function_ms": {
+            "embed_image_70_landscape": 319872.452958,
+            "embed_image_70_portrait": 153628.279042,
+            "embed_image_70_square": 166841.0805,
+            "embed_image_70_tall": 128143.791542,
+            "embed_image_70_wide": 130552.630917,
+            "embed_text_128": 54264.99,
+            "embed_text_16": 48420.858667,
+            "embed_text_32": 50033.323833,
+            "embed_text_64": 52917.6455
+          },
+          "min_free_disk_mb": 30822.294924736023,
+          "model_revision": "file-99a7d34084f9186b",
+          "model_revisions": {
+            "70": "file-99a7d34084f9186b"
+          },
+          "os_version": "27.0.1",
+          "peak_rss_mb": 1517.6593780517578,
+          "run_id": "7f196033da204eab85f515846db453d7",
+          "started_at": "2026-10-29T12:20:03Z",
+          "status": "done",
+          "thermal_state": "serious",
+          "launches": 1,
+          "launch_errors": []
+        }
+      }
+    },
+    "package": {
+      "70": "artifacts/s6_device/unpacked/b70/EmbeddingGemma2.mlpackage",
+      "280": "artifacts/s6_device/unpacked/b280/EmbeddingGemma2.mlpackage"
+    },
+    "s4_recipe": "int8_table4",
+    "files_json_sha256": {
+      "70": "99a7d34084f9186b219a367b9eeee5197291491dde343f13e728a2f92b70178e",
+      "280": "c62452de7a142b3ae02806f445c77bfd30bbd1f89421a5e68f6e05ec3c02f4a6"
+    },
+    "expected_revisions": {
+      "70": "file-99a7d34084f9186b",
+      "280": "file-c62452de7a142b3a"
+    },
+    "bundle_id": "com.delavalom.egcm.demo"
+  },
+  "git_sha": "d5b2e6edc33e430f36c68399bd0b79b8cc7c92c8",
+  "git_dirty": false,
+  "code_hash": "70b253e29d57b0ce11af3f9b627b8e578c64e6e1bbcbc7916b73b3dc4204a11f",
+  "inputs_sha256": "a93761757aa78ab8b831f144bbcd4dbf2b66b7bc729904297bdaf652a48ce6cb",
+  "started_at": "2026-10-29T12:19:12.204338+00:00",
+  "finished_at": "2026-10-29T12:45:47.946677+00:00"
+}

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # usage: run.sh TAG names  — launches the probe, streams new lines, stops at DONE, a gone process, or 15 min without progress
-U=00008110-0014594C0A98401E; TAG=$1; NAMES=$2; F=/tmp/s6diag/probe-$TAG.txt; rm -f $F
+U=${UDID:?set UDID}; TAG=$1; NAMES=$2; F=/tmp/s6diag/probe-$TAG.txt; rm -f $F
 xcrun devicectl device process launch --device $U --terminate-existing com.delavalom.egcm.demo -- -tag $TAG -hold "$NAMES" ${@:3} >/dev/null 2>&1 || { echo "LAUNCH FAILED $TAG"; exit 1; }
 seen=0; last=$(date +%s)
 while true; do

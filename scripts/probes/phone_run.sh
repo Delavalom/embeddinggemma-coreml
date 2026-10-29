@@ -3,7 +3,7 @@
 # Lists the app's E5 cache and the phone's free space, launches the probe, waits for its report, lists again.
 # Writes ~/egcm-evidence-raw/<date>/<TAG>/{pre,post}.json, disk-{pre,post}.txt, probe.json, summary.json.
 set -u
-U=${UDID:-00008110-0014594C0A98401E}; APP=com.delavalom.egcm.demo; TAG=$1; shift
+U=${UDID:?set UDID}; APP=com.delavalom.egcm.demo; TAG=$1; shift
 D=~/egcm-evidence-raw/$(date +%F)/$TAG; mkdir -p $D
 REPO=$(git -C "$(dirname $0)" rev-parse --show-toplevel)
 list() { xcrun devicectl device info files --device $U --domain-type appDataContainer --domain-identifier $APP \

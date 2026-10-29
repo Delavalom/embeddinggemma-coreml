@@ -1,7 +1,7 @@
 #!/bin/zsh
 # usage: phone_watch.sh TAG MINUTES COUNT   lists the E5 cache and free space COUNT times, MINUTES apart, launching nothing
 # (closes the demo and puts the keeper in front first, so the phone stays awake: keep_awake.sh)
-U=${UDID:-00008110-0014594C0A98401E}; TAG=$1; D=~/egcm-evidence-raw/$(date +%F)/$TAG; mkdir -p $D
+U=${UDID:?set UDID}; TAG=$1; D=~/egcm-evidence-raw/$(date +%F)/$TAG; mkdir -p $D
 REPO=$(git -C "$(dirname $0)" rev-parse --show-toplevel)
 zsh $REPO/scripts/probes/keep_awake.sh || exit 1
 for i in $(seq 1 $3); do

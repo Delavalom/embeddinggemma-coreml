@@ -8,7 +8,7 @@
 - [ ] **Step 1: Record the phone's state before changing anything.**
 
 ```bash
-U=00008110-0014594C0A98401E; D=~/egcm-evidence-raw/$(date +%F); mkdir -p $D
+U=${UDID:?set UDID}; D=~/egcm-evidence-raw/$(date +%F); mkdir -p $D
 xcrun devicectl device info details --device $U --json-output $D/details-$(date +%H%M).json >/dev/null
 xcrun devicectl device info files --device $U --domain-type appDataContainer \
   --domain-identifier com.delavalom.egcm.demo --subdirectory Library --json-output $D/listing-pre-uninstall.json >/dev/null

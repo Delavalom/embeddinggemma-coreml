@@ -139,7 +139,7 @@ repeated 3 times (r1–r3), and every run is reported.
   cold, or an A whose payload vanished), the founder runs:
 
 ```bash
-sudo log collect --device-udid 00008110-0014594C0A98401E --last 20m --output ~/egcm-evidence-raw/$(date +%F)/e2-<tag>.logarchive
+sudo log collect --device-udid <UDID> --last 20m --output ~/egcm-evidence-raw/$(date +%F)/e2-<tag>.logarchive
 log show ~/egcm-evidence-raw/$(date +%F)/e2-<tag>.logarchive --style compact --predicate \
  'process == "ANECompilerService" OR process == "aned" OR process == "deleted" OR process == "cachedeleted" OR subsystem CONTAINS[c] "coreml" OR subsystem CONTAINS[c] "e5rt" OR process == "PhotoSearchDemo"' \
  > ~/egcm-evidence-raw/$(date +%F)/e2-<tag>.txt

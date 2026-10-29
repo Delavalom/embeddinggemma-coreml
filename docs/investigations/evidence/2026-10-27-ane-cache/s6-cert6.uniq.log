@@ -1,19 +1,19 @@
-   1 [s6] bundling EmbeddingGemma2-b70.aar as /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/Examples/PhotoSearchDemo/Model/b70 (files.json 99a7d34084f9186b)
-   1 [s6] bundling EmbeddingGemma2-b280.aar as /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/Examples/PhotoSearchDemo/Model/b280 (files.json c62452de7a142b3a)
-   1 [s6] building PhotoSearchDemo for iPhone 13 Pro Max (log: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/xcodebuild.log)
+   1 [s6] bundling EmbeddingGemma2-b70.aar as Examples/PhotoSearchDemo/Model/b70 (files.json 99a7d34084f9186b)
+   1 [s6] bundling EmbeddingGemma2-b280.aar as Examples/PhotoSearchDemo/Model/b280 (files.json c62452de7a142b3a)
+   1 [s6] building PhotoSearchDemo for iPhone 13 Pro Max (log: artifacts/s6_device/xcodebuild.log)
    1 [s6] installing on iPhone 13 Pro Max (iPhone14,3, iOS 27.0.1)
    1 [s6] compiling every function (minutes on a fresh install)
-   1 [s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+   1 [s6] launched -compile. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-compile.log
    1 [s6] the phone is locked: unlock it (keep it on the cable); retrying every 30 s
- 120 [s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+ 120 [s6] launched -compile. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-compile.log
    1 [s6] compile launch 1 failed (could not launch -compile: unlock the phone); relaunching in 15 s
-   1 [s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+   1 [s6] launched -compile. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-compile.log
    1 [s6] the phone is locked: unlock it (keep it on the cable); retrying every 30 s
-  64 [s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+  64 [s6] launched -compile. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-compile.log
    1 [s6] compile launch 2 failed (the app exited (code 1) without writing a result for run fbee8d27e7b34cd9aff4c97f43510503); relaunching in 15 s
-   1 [s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+   1 [s6] launched -compile. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-compile.log
    1 [s6] compile launch 3 failed (the app exited (code 1) without writing a result for run 239ceb209e644b1c9e510ea84b8164ad); relaunching in 15 s
-   1 [s6] launched -compile. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-compile.log
+   1 [s6] launched -compile. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-compile.log
    1 [s6] benchmarking. Tap Allow Full Access on the phone if it asks for Photos (first run only)
-   1 [s6] launched -benchmark. Keep the phone unlocked. Console: /Users/delavalom/delavalom-labs/embeddinggemma-coreml-rewrite/artifacts/s6_device/console_iPhone14,3-benchmark.log
+   1 [s6] launched -benchmark. Keep the phone unlocked. Console: artifacts/s6_device/console_iPhone14,3-benchmark.log
    1 error: recipe `stage` failed with exit code 1
