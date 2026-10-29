@@ -65,7 +65,7 @@ only its budget's.
      `launches` and `launch_errors`.
    - `-benchmark` (`BenchmarkRunner.swift`, below). Writes `Documents/s6_device.json`.
 5. For each launch, polls `devicectl device copy from --domain-type appDataContainer --source <file>` every 15 s
-   for up to 30 min. Only a file with this run's `run_id` counts; `status: error` fails at once with the app's
+   for up to 60 min (the compile run: 120 min). Only a file with this run's `run_id` counts; `status: error` fails at once with the app's
    message; the app exiting without a result fails too. The stage fails if either run used another model, or if
    a benchmark function load took over 30 s (a compile the compile run did not cache).
 

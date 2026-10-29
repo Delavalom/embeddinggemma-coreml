@@ -75,11 +75,11 @@ def test_poll_ignores_missing_and_old_results_then_returns():
     assert clock.sleeps == [15, 15, 15]
 
 
-def test_poll_times_out_after_30_minutes():
+def test_poll_times_out_after_60_minutes():
     clock = FakeClock()
-    with pytest.raises(TimeoutError, match="30 min"):
+    with pytest.raises(TimeoutError, match="60 min"):
         poll([], clock)
-    assert len(clock.sleeps) == 30 * 60 // 15
+    assert len(clock.sleeps) == 60 * 60 // 15
 
 
 def test_poll_raises_the_apps_error():

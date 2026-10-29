@@ -19,7 +19,9 @@ RESULT_FILE = "Documents/s6_device.json"
 # The `-compile` launch's result (ADR-0009).
 COMPILE_RESULT_FILE = "Documents/s6_compile.json"
 POLL_SECONDS = 15
-TIMEOUT_SECONDS = 30 * 60
+# 60 min: the benchmark fetches 1,000 full-quality photos and, on an iCloud-optimized library (the founder's is
+# ~98 % iCloud-only), iOS downloads most of them; at ~2.4 s/photo that is ~40 min (2026-10-29).
+TIMEOUT_SECONDS = 60 * 60
 NO_DEVICE = ("connect an iPhone with Developer Mode (Settings > Privacy & Security > Developer Mode), "
              "unlocked and trusted")
 
